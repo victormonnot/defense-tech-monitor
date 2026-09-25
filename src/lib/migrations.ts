@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-const CURRENT_VERSION = 4;
+const CURRENT_VERSION = 5;
 
 export function migrate(db: DatabaseSync) {
   db.exec("BEGIN IMMEDIATE");
@@ -66,6 +66,22 @@ export function migrate(db: DatabaseSync) {
       db.prepare(
         "INSERT OR IGNORE INTO settings (key,value) VALUES ('activity_started_at',?)",
       ).run(new Date().toISOString());
+    }
+    if (version < 5) {
+      db.exec(`
+        CREATE TABLE folders (
+          id TEXT PRIMARY KEY, name TEXT NOT NULL, name_key TEXT NOT NULL UNIQUE,
+          archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN (0, 1)),
+          created_at TEXT NOT NULL
+        );
+        CREATE TABLE article_folders (
+          article_id TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+          folder_id TEXT NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
+          PRIMARY KEY(article_id, folder_id)
+        );
+        CREATE INDEX article_folders_folder ON article_folders(folder_id, article_id);
+        PRAGMA user_version = 5;
+      `);
     }
     db.exec("COMMIT");
   } catch (error) {

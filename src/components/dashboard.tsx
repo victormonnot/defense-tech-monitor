@@ -12,6 +12,7 @@ import {
   Compass,
   ExternalLink,
   Eye,
+  FolderOpen,
   Globe2,
   Layers3,
   ListFilter,
@@ -31,6 +32,7 @@ import {
 import type {
   Article,
   Feedback,
+  Folder,
   MonitorAction,
   Profile,
   ProfilePreview,
@@ -52,8 +54,16 @@ import {
   matchesEvaluation,
   type EvaluationFilter,
 } from "@/lib/selection";
+import { ArticleFolders, FolderManager } from "@/components/folder-controls";
 
-type View = "personal" | "all" | "saved" | "evaluation" | "sources" | "profile";
+type View =
+  | "personal"
+  | "all"
+  | "saved"
+  | "folders"
+  | "evaluation"
+  | "sources"
+  | "profile";
 type Notice = { kind: "success" | "error"; text: string } | null;
 type RelatedPublication = { article: Article; reason: string };
 
@@ -61,6 +71,7 @@ const views = [
   { id: "personal", label: "Pour moi", icon: Compass },
   { id: "all", label: "Tout le flux", icon: Radio },
   { id: "saved", label: "Sauvegardés", icon: Bookmark },
+  { id: "folders", label: "Dossiers", icon: FolderOpen },
   { id: "evaluation", label: "Évaluer", icon: CheckCheck },
   { id: "sources", label: "Sources", icon: Rss },
   { id: "profile", label: "Profil de veille", icon: Settings2 },
@@ -87,6 +98,12 @@ const viewCopy: Record<
     title: "Sauvegardés",
     description:
       "Vos publications sauvegardées, pour y revenir quand vous en avez besoin.",
+  },
+  folders: {
+    eyebrow: "VOTRE BIBLIOTHÈQUE",
+    title: "Dossiers",
+    description:
+      "Organisez vos publications par sujet. Une publication peut appartenir à plusieurs dossiers.",
   },
   evaluation: {
     eyebrow: "VOS RETOURS",
@@ -177,6 +194,11 @@ function splitKeywords(value: string) {
 export function Dashboard({ initialData }: { initialData: Snapshot }) {
   const [data, setData] = useState(initialData);
   const [view, setView] = useState<View>("personal");
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(
+    initialData.folders.find((folder) => !folder.archived)?.id ??
+      initialData.folders[0]?.id ??
+      null,
+  );
   const [pending, setPending] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice>(null);
   const [search, setSearch] = useState("");
@@ -209,6 +231,11 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
     matchesProfile(article, data.profile),
   );
   const saved = data.articles.filter((article) => article.saved);
+  const selectedFolder =
+    data.folders.find((folder) => folder.id === selectedFolderId) ??
+    data.folders.find((folder) => !folder.archived) ??
+    data.folders[0] ??
+    null;
   const enabledSources = data.sources.filter((source) => source.enabled).length;
   const hasFilters = Boolean(
     search ||
@@ -231,6 +258,11 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
       if (view === "personal" && !matchesProfile(article, data.profile))
         return false;
       if (view === "saved" && !article.saved) return false;
+      if (
+        view === "folders" &&
+        (!selectedFolder || !article.folderIds.includes(selectedFolder.id))
+      )
+        return false;
       if (
         view === "evaluation" &&
         !matchesEvaluation(article, data.profile, evaluationFilter)
@@ -260,6 +292,7 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
     themeFilter,
     formatFilter,
     evaluationFilter,
+    selectedFolder,
   ]);
 
   const articles = useMemo(() => {
@@ -327,6 +360,7 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
       });
       const result = (await response.json()) as {
         snapshot?: Snapshot;
+        folderId?: string;
         message?: string;
         error?: string;
       };
@@ -335,6 +369,18 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
           result.error || "L’action n’a pas pu être effectuée. Réessayez.",
         );
       setData(result.snapshot);
+      if (action.action === "createFolder") {
+        if (result.folderId) {
+          setSelectedFolderId(result.folderId);
+          resetFilters();
+        }
+      } else if (selectedFolderId === null) {
+        setSelectedFolderId(
+          result.snapshot.folders.find((folder) => !folder.archived)?.id ??
+            result.snapshot.folders[0]?.id ??
+            null,
+        );
+      }
       if (result.message || successMessage)
         setNotice({ kind: "success", text: result.message || successMessage! });
       return true;
@@ -421,6 +467,11 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
   function changeView(next: View) {
     setView(next);
     resetFilters();
+  }
+
+  function openFolder(id?: string) {
+    setSelectedFolderId(id ?? selectedFolder?.id ?? null);
+    changeView("folders");
   }
 
   function resetSourceForm() {
@@ -513,6 +564,12 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
               {id === "saved" && saved.length > 0 && (
                 <span className="nav-count">{saved.length}</span>
               )}
+              {id === "folders" &&
+                data.folders.some((folder) => !folder.archived) && (
+                  <span className="nav-count">
+                    {data.folders.filter((folder) => !folder.archived).length}
+                  </span>
+                )}
             </button>
           ))}
         </nav>
@@ -533,6 +590,12 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
             <span>Monitor</span>
             <ChevronRight size={14} />
             <strong>{views.find((item) => item.id === view)?.label}</strong>
+            {view === "folders" && selectedFolder && (
+              <>
+                <ChevronRight size={14} />
+                <span className="breadcrumb-folder">{selectedFolder.name}</span>
+              </>
+            )}
           </div>
           <span className="topbar-label">
             <span className="tiny-dot" /> Veille personnelle
@@ -616,9 +679,20 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
             />
           </div>
 
+          {view === "folders" && (
+            <FolderManager
+              folders={data.folders}
+              selectedFolder={selectedFolder}
+              busy={busy}
+              onSelect={openFolder}
+              onAction={(action) => mutate(action)}
+            />
+          )}
+
           {(view === "personal" ||
             view === "all" ||
             view === "saved" ||
+            (view === "folders" && selectedFolder) ||
             view === "evaluation") && (
             <>
               {view === "personal" && (
@@ -695,16 +769,22 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                         ? "Votre sélection"
                         : view === "saved"
                           ? "Vos sauvegardes"
-                          : view === "evaluation"
-                            ? evaluationFilters.find(
-                                (filter) => filter.id === evaluationFilter,
-                              )?.label
-                            : "Toutes les publications"}
+                          : view === "folders"
+                            ? selectedFolder?.name
+                            : view === "evaluation"
+                              ? evaluationFilters.find(
+                                  (filter) => filter.id === evaluationFilter,
+                                )?.label
+                              : "Toutes les publications"}
                     </h2>
                     <span className="count-badge">{articles.length}</span>
                   </div>
                   <span className="section-meta">
-                    Publications des sources suivies
+                    {view === "folders"
+                      ? selectedFolder?.archived
+                        ? "Dossier archivé"
+                        : "Publications classées dans ce dossier"
+                      : "Publications des sources suivies"}
                   </span>
                 </div>
                 <div className="filter-panel">
@@ -923,6 +1003,8 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                         group={item.group}
                         matchScope={data.profile.matchScope}
                         relatedByArticle={relatedByArticle}
+                        folders={data.folders}
+                        onOpenFolders={openFolder}
                         busy={busy}
                         onAction={onAction}
                       />
@@ -932,6 +1014,8 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                         article={item.articles[0]}
                         matchScope={data.profile.matchScope}
                         related={relatedByArticle.get(item.articles[0].id)}
+                        folders={data.folders}
+                        onOpenFolders={openFolder}
                         busy={busy}
                         onAction={onAction}
                       />
@@ -940,7 +1024,9 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                   {articles.length === 0 && (
                     <div className="empty-state">
                       <span className="empty-icon">
-                        {view === "saved" ? (
+                        {view === "folders" ? (
+                          <FolderOpen size={26} />
+                        ) : view === "saved" ? (
                           <Bookmark size={26} />
                         ) : (
                           <Radio size={26} />
@@ -951,22 +1037,28 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                           ? "Aucune publication ne correspond."
                           : view === "evaluation"
                             ? "Aucune publication dans cette catégorie."
-                            : view === "saved"
-                              ? "Votre bibliothèque commence ici."
-                              : data.articles.length === 0
-                                ? "Prêt pour votre première collecte."
-                                : "Votre sélection est encore vide."}
+                            : view === "folders"
+                              ? "Ce dossier est encore vide."
+                              : view === "saved"
+                                ? "Votre bibliothèque commence ici."
+                                : data.articles.length === 0
+                                  ? "Prêt pour votre première collecte."
+                                  : "Votre sélection est encore vide."}
                       </h3>
                       <p>
                         {hasFilters
                           ? "Essayez un autre mot-clé ou élargissez vos filtres."
                           : view === "evaluation"
                             ? "Évaluez les publications du flux pour comparer vos retours aux règles de sélection."
-                            : view === "saved"
-                              ? "Sauvegardez une publication depuis le flux pour la retrouver ici."
-                              : data.articles.length === 0
-                                ? "Actualisez les sources pour récupérer les publications disponibles."
-                                : "Explorez tout le flux ou ajustez les critères de votre profil."}
+                            : view === "folders"
+                              ? selectedFolder?.archived
+                                ? "Restaurez ce dossier pour y classer des publications."
+                                : "Depuis le flux, utilisez « Classer » pour ajouter des publications à ce dossier."
+                              : view === "saved"
+                                ? "Sauvegardez une publication depuis le flux pour la retrouver ici."
+                                : data.articles.length === 0
+                                  ? "Actualisez les sources pour récupérer les publications disponibles."
+                                  : "Explorez tout le flux ou ajustez les critères de votre profil."}
                       </p>
                       {hasFilters ? (
                         <button
@@ -976,6 +1068,7 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                           Réinitialiser les filtres
                         </button>
                       ) : view === "saved" ||
+                        view === "folders" ||
                         view === "evaluation" ||
                         (view === "personal" && data.articles.length > 0) ? (
                         <button
@@ -1759,6 +1852,8 @@ function StoryCard({
   group,
   matchScope,
   relatedByArticle,
+  folders,
+  onOpenFolders,
   busy,
   onAction,
 }: {
@@ -1766,6 +1861,8 @@ function StoryCard({
   group: StoryGroup;
   matchScope?: Profile["matchScope"];
   relatedByArticle: Map<string, RelatedPublication[]>;
+  folders: Folder[];
+  onOpenFolders: (id?: string) => void;
   busy: boolean;
   onAction: (action: MonitorAction) => void;
 }) {
@@ -1799,6 +1896,8 @@ function StoryCard({
         matchScope={matchScope}
         grouped
         related={relatedByArticle.get(lead.id)}
+        folders={folders}
+        onOpenFolders={onOpenFolders}
         busy={busy}
         onAction={onAction}
       />
@@ -1839,6 +1938,13 @@ function StoryCard({
                 onAction={onAction}
               />
             </div>
+            <ArticleFolders
+              article={article}
+              folders={folders}
+              busy={busy}
+              onAction={onAction}
+              onOpenFolders={onOpenFolders}
+            />
             <details className="story-member-details">
               <summary>Détails et actions pour cette publication</summary>
               <ArticleCard
@@ -1846,6 +1952,9 @@ function StoryCard({
                 matchScope={matchScope}
                 grouped
                 related={relatedByArticle.get(article.id)}
+                folders={folders}
+                showFolders={false}
+                onOpenFolders={onOpenFolders}
                 busy={busy}
                 onAction={onAction}
               />
@@ -1862,6 +1971,9 @@ function ArticleCard({
   matchScope,
   grouped = false,
   related = [],
+  folders,
+  showFolders = true,
+  onOpenFolders,
   busy,
   onAction,
 }: {
@@ -1869,6 +1981,9 @@ function ArticleCard({
   matchScope?: Profile["matchScope"];
   grouped?: boolean;
   related?: RelatedPublication[];
+  folders: Folder[];
+  showFolders?: boolean;
+  onOpenFolders: (id?: string) => void;
   busy: boolean;
   onAction: (action: MonitorAction) => void;
 }) {
@@ -2002,6 +2117,15 @@ function ArticleCard({
           selon les règles
         </small>
       </div>
+      {showFolders && (
+        <ArticleFolders
+          article={article}
+          folders={folders}
+          busy={busy}
+          onAction={onAction}
+          onOpenFolders={onOpenFolders}
+        />
+      )}
       <div className="article-actions">
         <div className="reading-actions">
           <button

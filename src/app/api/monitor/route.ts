@@ -6,6 +6,7 @@ import { validateRemoteUrl } from "@/lib/network";
 import { getStore } from "@/lib/store";
 import { parseProfile } from "@/lib/profile";
 import { parseActivityBatch } from "@/lib/activity";
+import { parseFolderName } from "@/lib/folders";
 import type { Feedback } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -88,6 +89,42 @@ export async function POST(request: NextRequest) {
         if (typeof body.enabled !== "boolean")
           throw new Error("État invalide.");
         store.toggleSource(text(body.id, "Source"), body.enabled);
+        break;
+      }
+      case "createFolder": {
+        const folderId = store.createFolder(parseFolderName(body.name).name);
+        return json({
+          snapshot: store.snapshot(),
+          folderId,
+          message: "Dossier créé.",
+        });
+      }
+      case "renameFolder": {
+        store.renameFolder(
+          text(body.id, "Dossier"),
+          parseFolderName(body.name).name,
+        );
+        message = "Dossier renommé.";
+        break;
+      }
+      case "setFolderArchived": {
+        if (typeof body.value !== "boolean") throw new Error("État invalide.");
+        store.setFolderArchived(text(body.id, "Dossier"), body.value);
+        message = body.value
+          ? "Dossier archivé. Son contenu est conservé."
+          : "Dossier réactivé.";
+        break;
+      }
+      case "setArticleFolder": {
+        if (typeof body.value !== "boolean") throw new Error("État invalide.");
+        store.setArticleFolder(
+          text(body.id, "Publication"),
+          text(body.folderId, "Dossier"),
+          body.value,
+        );
+        message = body.value
+          ? "Publication ajoutée au dossier."
+          : "Publication retirée du dossier.";
         break;
       }
       case "setRead":

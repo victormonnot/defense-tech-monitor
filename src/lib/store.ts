@@ -11,10 +11,12 @@ import { buildStories } from "./stories";
 import { evaluateSelection, matchesProfile } from "./selection";
 import { classificationText } from "./profile";
 import { MAX_ACTIVITY_BATCH } from "./activity";
+import { parseFolderName } from "./folders";
 import type {
   ActivityReview,
   Article,
   Feedback,
+  Folder,
   Profile,
   ProfilePreview,
   Snapshot,
@@ -22,6 +24,15 @@ import type {
 } from "./types";
 
 type Row = Record<string, string | number | null>;
+
+function validIdentifier(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 200 &&
+    value === value.trim()
+  );
+}
 
 export class MonitorStore {
   readonly db: DatabaseSync;
@@ -198,6 +209,95 @@ export class MonitorStore {
       .run(typeof value === "boolean" ? Number(value) : value, id);
   }
 
+  createFolder(value: string): string {
+    const { name, key } = parseFolderName(value);
+    if (this.db.prepare("SELECT id FROM folders WHERE name_key=?").get(key))
+      throw new Error(
+        "Un dossier porte déjà ce nom, y compris parmi les archives.",
+      );
+    const id = randomUUID();
+    this.db
+      .prepare(
+        "INSERT INTO folders (id,name,name_key,created_at) VALUES (?,?,?,?)",
+      )
+      .run(id, name, key, new Date().toISOString());
+    return id;
+  }
+
+  renameFolder(id: string, value: string): void {
+    const { name, key } = parseFolderName(value);
+    if (
+      !validIdentifier(id) ||
+      !this.db.prepare("SELECT id FROM folders WHERE id=?").get(id)
+    )
+      throw new Error("Dossier inconnu.");
+    if (
+      this.db
+        .prepare("SELECT id FROM folders WHERE name_key=? AND id<>?")
+        .get(key, id)
+    )
+      throw new Error(
+        "Un dossier porte déjà ce nom, y compris parmi les archives.",
+      );
+    this.db
+      .prepare("UPDATE folders SET name=?,name_key=? WHERE id=?")
+      .run(name, key, id);
+  }
+
+  setFolderArchived(id: string, archived: boolean): void {
+    if (typeof archived !== "boolean")
+      throw new Error("État du dossier invalide.");
+    if (
+      !validIdentifier(id) ||
+      !this.db.prepare("SELECT id FROM folders WHERE id=?").get(id)
+    )
+      throw new Error("Dossier inconnu.");
+    this.db
+      .prepare("UPDATE folders SET archived=? WHERE id=?")
+      .run(Number(archived), id);
+  }
+
+  setArticleFolder(articleId: string, folderId: string, value: boolean): void {
+    if (typeof value !== "boolean") throw new Error("Classement invalide.");
+    if (!validIdentifier(articleId)) throw new Error("Publication inconnue.");
+    if (!validIdentifier(folderId)) throw new Error("Dossier inconnu.");
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      if (!this.db.prepare("SELECT id FROM articles WHERE id=?").get(articleId))
+        throw new Error("Publication inconnue.");
+      const folder = this.db
+        .prepare("SELECT archived FROM folders WHERE id=?")
+        .get(folderId);
+      if (!folder) throw new Error("Dossier inconnu.");
+      if (value) {
+        const assigned = this.db
+          .prepare(
+            "SELECT 1 FROM article_folders WHERE article_id=? AND folder_id=?",
+          )
+          .get(articleId, folderId);
+        if (!assigned && folder.archived)
+          throw new Error(
+            "Restaurez le dossier avant d’y ajouter une publication.",
+          );
+        this.db
+          .prepare(
+            "INSERT OR IGNORE INTO article_folders (article_id,folder_id) VALUES (?,?)",
+          )
+          .run(articleId, folderId);
+      } else {
+        this.db
+          .prepare(
+            "DELETE FROM article_folders WHERE article_id=? AND folder_id=?",
+          )
+          .run(articleId, folderId);
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   acknowledgeChanges(items: ActivityReview[]): number {
     if (
       !Array.isArray(items) ||
@@ -365,6 +465,42 @@ export class MonitorStore {
   snapshot(profileOverride?: Profile): Snapshot {
     const sources = this.sources();
     const profile = profileOverride ?? this.profile();
+    const folderRows = this.db
+      .prepare(
+        "SELECT f.*,COUNT(af.article_id) AS article_count FROM folders f LEFT JOIN article_folders af ON af.folder_id=f.id GROUP BY f.id",
+      )
+      .all() as Row[];
+    const folders: Folder[] = folderRows
+      .map((row) => ({
+        id: String(row.id),
+        name: String(row.name),
+        archived: !!row.archived,
+        articleCount: Number(row.article_count),
+        createdAt: String(row.created_at),
+      }))
+      .sort(
+        (a, b) =>
+          Number(a.archived) - Number(b.archived) ||
+          a.name.localeCompare(b.name, "fr", {
+            sensitivity: "base",
+            numeric: true,
+          }) ||
+          a.id.localeCompare(b.id),
+      );
+    const folderOrder = new Map(
+      folders.map((folder, index) => [folder.id, index]),
+    );
+    const memberships = new Map<string, string[]>();
+    for (const row of this.db
+      .prepare("SELECT article_id,folder_id FROM article_folders")
+      .all()) {
+      const id = String(row.article_id);
+      const assigned = memberships.get(id) ?? [];
+      assigned.push(String(row.folder_id));
+      memberships.set(id, assigned);
+    }
+    for (const assigned of memberships.values())
+      assigned.sort((a, b) => folderOrder.get(a)! - folderOrder.get(b)!);
     const rows = this.db
       .prepare(
         "SELECT a.*,s.name AS source_name FROM articles a JOIN sources s ON s.id=a.source_id ORDER BY COALESCE(a.published_at,a.collected_at) DESC",
@@ -394,6 +530,7 @@ export class MonitorStore {
       saved: !!r.saved,
       feedback: r.feedback as Feedback | null,
       keepSeparate: !!r.keep_separate,
+      folderIds: memberships.get(String(r.id)) ?? [],
       ...this.classifier.classify(
         classificationText(
           {
@@ -411,6 +548,7 @@ export class MonitorStore {
     );
     return {
       articles,
+      folders,
       sources,
       profile,
       stories: buildStories(

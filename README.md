@@ -35,6 +35,7 @@ The interface currently uses French labels:
 - **For me — Pour moi**: publications matching your profile, plus those explicitly marked relevant. Items marked off-topic or already seen are excluded.
 - **Full feed — Tout le flux**: all collected publications, with search and filters for source, topic, language, and format.
 - **Saved — Sauvegardés**: bookmarked publications, preserved across restarts.
+- **Folders — Dossiers**: organize publications into named folders and browse their contents with the usual feed filters.
 - **Evaluate — Évaluer**: review unjudged publications, find relevant items missed by the rules, inspect rule matches you marked off-topic, or revisit all your feedback. Publications are displayed individually in this view.
 - **Sources**: add websites or feeds, edit their configuration, enable or disable collection, and inspect the collection method, address, status, and errors.
 - **Monitoring profile — Profil de veille**: keywords, exclusions, the minimum number of matches required, and the content used for selection. An exclusion keyword rejects an article under the rules; explicitly marking it relevant overrides that decision for your personal feed.
@@ -42,6 +43,14 @@ The interface currently uses French labels:
 Start collection with **Refresh sources — Actualiser les sources** or `npm run collect`. Collection is not scheduled automatically. By default, a source checked within the last 15 minutes is skipped. Set `DTM_COLLECTION_INTERVAL_MINUTES` to change this interval; source access restrictions and crawl delays still apply.
 
 Feedback corrects your feed immediately: **Relevant — Pertinent** retains a publication even below the keyword threshold, while **Off-topic — Hors sujet** and **Already seen — Déjà vu** remove it from For me. Click the selected feedback button again to clear the correction and return to the rule-based decision. The article and its read/saved states remain available in the full feed. Feedback does not train a model or change your keywords automatically.
+
+### Organizing publications
+
+Create and rename folders under **Folders — Dossiers**. Use **Classer** on a publication to add it to one or more folders, or remove it from a folder. Each publication in a grouped announcement has its own assignments. Folder membership is independent of bookmarks, read state, feedback, and change acknowledgements; filing an article does not alter your personal selection.
+
+Choose a folder to browse its publications, then narrow the results using search, source, language, topic, format, or activity filters. Grouping applies only to the matching publications. A folder's total count includes all its members, including those outside For me or Saved.
+
+Archiving a folder preserves its contents and leaves them available for consultation. Archived folders cannot receive new publications until reactivated; existing assignments can still be removed. Folder names are limited to 80 characters and must be unique, including archived folders, after normalizing case and spacing. Reactivating a folder restores it with its remaining assignments. Folders and assignments persist locally across collection and restarts.
 
 ### Catching up on collected changes
 
@@ -96,10 +105,10 @@ Collection respects `robots.txt`, limits response size, applies timeouts, and va
 - Full articles are not republished. The application does not bypass paywalls, transcribe videos, or invent summaries from titles.
 - Classification uses deterministic keyword rules, with limitations around synonyms and languages. Matches indicate relevance to a profile, never the reliability of a claim.
 - Repeated imports of a publication from the same source are detected through its identifier or normalized URL. Cross-source grouping requires the same known language, publication dates no more than seven days apart, and matching ordered title words after typographic normalization, including specific terms beyond generic defense vocabulary. When text is available, all collected text must also match in word order, not just the displayed excerpt. All members must match each other; a chain of loosely related articles is insufficient. Missing dates, different languages, changed numbers, follow-up signals, and different or incomplete text prevent grouping. Weaker title matches remain separate with comparison hints. This favors missed matches over hiding new information. It does not translate titles, fetch additional article bodies, or verify claims.
-- This version does not include exhaustive archive imports, generated summaries, topic folders, alerts, or audio.
+- This version does not include exhaustive archive imports, generated summaries, alerts, or audio.
 - The database and `.env` files are excluded from Git. The example configuration contains no secrets. To back up local data, stop the application and copy the `data/` directory.
 
-Existing databases are upgraded automatically to schema version 4 when opened. Migrations add content provenance, a per-publication grouping preference, and revision-based change tracking while preserving collected publications, read and saved states, feedback, source activation settings, and the keyword profile. Groups are derived from the current publications; they do not merge or delete database records.
+Existing databases are upgraded automatically to schema version 5 when opened. Migrations add content provenance, a per-publication grouping preference, revision-based change tracking, and folder storage while preserving collected publications, read and saved states, feedback, source activation settings, and the keyword profile. Groups are derived from the current publications; they do not merge or delete database records.
 
 ## Architecture
 
@@ -116,6 +125,7 @@ src/lib/classifier.ts  Replaceable classification and explicit rules
 src/lib/profile.ts     Profile validation and selection text scope
 src/lib/selection.ts   Personal corrections and evaluation of raw rule decisions
 src/lib/activity.ts    Change filters and bounded revision acknowledgements
+src/lib/folders.ts     Folder name validation and normalization
 src/lib/stories.ts     Conservative announcement grouping and comparison hints
 src/lib/story-feed.ts  Group presentation after view and search filters
 src/app/api/monitor/   Local reads and mutations

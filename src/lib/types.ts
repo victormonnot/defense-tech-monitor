@@ -42,6 +42,15 @@ export interface Article {
   saved: boolean;
   feedback: Feedback | null;
   keepSeparate: boolean;
+  folderIds: string[];
+}
+
+export interface Folder {
+  id: string;
+  name: string;
+  archived: boolean;
+  articleCount: number;
+  createdAt: string;
 }
 
 export interface Profile {
@@ -76,6 +85,7 @@ export interface ProfilePreview {
 export interface Snapshot {
   articles: Article[];
   sources: Source[];
+  folders: Folder[];
   profile: Profile;
   stories: { groups: StoryGroup[]; related: StoryRelation[] };
   stats: { total: number; selected: number; unread: number; saved: number };
@@ -109,5 +119,9 @@ export type MonitorAction =
   | { action: "setSeparate"; id: string; value: boolean }
   | { action: "setFeedback"; id: string; value: Feedback | null }
   | { action: "acknowledgeChanges"; articles: ActivityReview[] }
+  | { action: "createFolder"; name: string }
+  | { action: "renameFolder"; id: string; name: string }
+  | { action: "setFolderArchived"; id: string; value: boolean }
+  | { action: "setArticleFolder"; id: string; folderId: string; value: boolean }
   | { action: "previewProfile"; profile: Profile }
   | { action: "updateProfile"; profile: Profile };

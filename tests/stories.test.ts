@@ -27,6 +27,7 @@ function article(id: string, overrides: Partial<Article> = {}): Article {
     saved: false,
     feedback: null,
     keepSeparate: false,
+    folderIds: [],
     ...overrides,
   };
 }

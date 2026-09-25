@@ -8,12 +8,17 @@ import { MonitorStore } from "../src/lib/store";
 import { migrate } from "../src/lib/migrations";
 
 function removeActivitySchema(db: DatabaseSync) {
+  removeFolderSchema(db);
   db.exec(`
     ALTER TABLE articles DROP COLUMN revision;
     ALTER TABLE articles DROP COLUMN reviewed_revision;
     ALTER TABLE articles DROP COLUMN updated_at;
     DELETE FROM settings WHERE key IN ('activity_started_at', 'activity_last_reviewed_at');
   `);
+}
+
+function removeFolderSchema(db: DatabaseSync) {
+  db.exec("DROP TABLE article_folders; DROP TABLE folders;");
 }
 
 test("version 1 upgrades preserve publications, personal state, profile and source choices", (t) => {
@@ -72,7 +77,7 @@ test("version 1 upgrades preserve publications, personal state, profile and sour
   const upgraded = new MonitorStore(path);
   assert.equal(
     upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
-    4,
+    5,
   );
   assert.deepEqual(upgraded.snapshot().articles, before);
   assert.equal(upgraded.snapshot().activity.newCount, 0);
@@ -103,7 +108,7 @@ test("fresh migrations are idempotent and reject newer schemas without downgradi
   try {
     migrate(db);
     migrate(db);
-    assert.equal(db.prepare("PRAGMA user_version").get()?.user_version, 4);
+    assert.equal(db.prepare("PRAGMA user_version").get()?.user_version, 5);
     const startedAt = db
       .prepare("SELECT value FROM settings WHERE key='activity_started_at'")
       .get()?.value;
@@ -165,7 +170,7 @@ test("version 2 upgrades add reversible grouping preferences without changing ex
   try {
     assert.equal(
       upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
-      4,
+      5,
     );
     const after = upgraded.snapshot();
     assert.deepEqual(
@@ -234,7 +239,7 @@ test("version 3 upgrades baseline existing articles without changing personal or
     const after = upgraded.snapshot();
     assert.equal(
       upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
-      4,
+      5,
     );
     assert.deepEqual(
       { ...after, activity: undefined },
@@ -259,6 +264,57 @@ test("version 3 upgrades baseline existing articles without changing personal or
     );
     migrate(upgraded.db);
     assert.deepEqual(upgraded.snapshot(), after);
+  } finally {
+    upgraded.db.close();
+  }
+});
+
+test("version 4 upgrades preserve publications, activity and preferences without creating folders", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "dtm-migration-v4-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const path = join(directory, "monitor.sqlite");
+  const old = new MonitorStore(path);
+  const entry = {
+    guid: "synthetic-v4",
+    url: "https://example.test/v4",
+    title: "Synthetic drone trial",
+    publishedAt: null,
+    text: "Synthetic drone trial report.",
+    excerpt: "Synthetic drone trial.",
+    language: "en",
+    format: "article" as const,
+    contentHash: "v4-hash",
+  };
+  old.upsertEntries("brave1", [entry], "2026-09-01T12:00:00.000Z");
+  const article = old.snapshot().articles[0];
+  old.setArticleState(article.id, "saved", true);
+  old.setArticleState(article.id, "is_read", true);
+  old.setArticleState(article.id, "feedback", "relevant");
+  old.setArticleState(article.id, "keep_separate", true);
+  old.acknowledgeChanges([article]);
+  old.upsertEntries(
+    "brave1",
+    [{ ...entry, title: "Synthetic drone trial correction" }],
+    "2026-09-02T12:00:00.000Z",
+  );
+  old.setProfile({ keywords: ["synthetic"], excludeKeywords: [], minScore: 2 });
+  old.toggleSource("brave1", false);
+  const before = old.snapshot();
+  removeFolderSchema(old.db);
+  old.db.exec("PRAGMA user_version=4");
+  old.db.close();
+  const upgraded = new MonitorStore(path);
+  try {
+    assert.equal(
+      upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
+      5,
+    );
+    assert.deepEqual(upgraded.snapshot(), before);
+    assert.deepEqual(upgraded.snapshot().folders, []);
+    assert.deepEqual(upgraded.snapshot().articles[0].folderIds, []);
+    assert.equal(upgraded.snapshot().articles[0].changeKind, "updated");
+    migrate(upgraded.db);
+    assert.deepEqual(upgraded.snapshot(), before);
   } finally {
     upgraded.db.close();
   }

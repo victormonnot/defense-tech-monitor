@@ -67,6 +67,7 @@ import { DigestView } from "@/components/digest-view";
 import { JevArticleIndicator, JevPanel } from "@/components/jev-panel";
 import { FeedManager, FeedSettings } from "@/components/feed-settings";
 import { GENERAL_FEED_ID } from "@/lib/custom-feeds";
+import { ArticleSummaryPanel, SummaryPanel } from "@/components/summary-panel";
 
 type View =
   | "personal"
@@ -476,9 +477,10 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
           null;
         setSelectedFolderId((current) => current ?? fallbackFolderId);
       }
-      if (result.message || successMessage)
+      if (result.error) setNotice({ kind: "error", text: result.error });
+      else if (result.message || successMessage)
         setNotice({ kind: "success", text: result.message || successMessage! });
-      return true;
+      return !result.error;
     } catch (error) {
       setNotice({
         kind: "error",
@@ -637,6 +639,9 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
       ? { ...viewCopy.feed, title: selectedFeed.name }
       : viewCopy[view];
   const busy = pending !== null;
+  const pendingSummaryId = pending?.startsWith("generateSummary-")
+    ? pending.slice("generateSummary-".length)
+    : null;
 
   return (
     <div className="app-shell">
@@ -1234,7 +1239,10 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                     )}
                   </p>
                 </div>
-                <div className="article-list" aria-busy={busy}>
+                <div
+                  className="article-list"
+                  aria-busy={busy && pendingSummaryId === null}
+                >
                   {feedItems.map((item) => {
                     const onAction = (action: MonitorAction) =>
                       void mutate(
@@ -1262,6 +1270,8 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                         onOpenFolders={openFolder}
                         busy={busy}
                         onAction={onAction}
+                        pendingSummaryId={pendingSummaryId}
+                        onOpenProfile={() => changeView("profile")}
                         feedName={
                           view === "feed" ? selectedFeed?.name : undefined
                         }
@@ -1276,6 +1286,10 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                         onOpenFolders={openFolder}
                         busy={busy}
                         onAction={onAction}
+                        summaryPending={
+                          pendingSummaryId === item.articles[0].id
+                        }
+                        onOpenProfile={() => changeView("profile")}
                         feedName={
                           view === "feed" ? selectedFeed?.name : undefined
                         }
@@ -1784,6 +1798,7 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                   busy={busy}
                   onAction={(action) => mutate(action)}
                 />
+                <SummaryPanel state={data.summaries} />
                 <section
                   className="panel evaluation-panel"
                   aria-labelledby="evaluation-title"
@@ -2145,6 +2160,8 @@ function StoryCard({
   busy,
   onAction,
   feedName,
+  pendingSummaryId,
+  onOpenProfile,
 }: {
   articles: Article[];
   group: StoryGroup;
@@ -2155,6 +2172,8 @@ function StoryCard({
   busy: boolean;
   onAction: (action: MonitorAction) => void;
   feedName?: string;
+  pendingSummaryId: string | null;
+  onOpenProfile: () => void;
 }) {
   const [lead, ...otherArticles] = articles;
   const sources = [...new Set(articles.map((article) => article.sourceName))];
@@ -2191,6 +2210,8 @@ function StoryCard({
         busy={busy}
         onAction={onAction}
         feedName={feedName}
+        summaryPending={pendingSummaryId === lead.id}
+        onOpenProfile={onOpenProfile}
       />
       <div className="story-members">
         <p className="story-members-label">Autres publications rapprochées</p>
@@ -2211,6 +2232,15 @@ function StoryCard({
                 {article.title} <ArrowUpRight size={15} />
               </a>
             </h3>
+            <ArticleSummaryPanel
+              article={article}
+              busy={busy}
+              pending={pendingSummaryId === article.id}
+              onGenerate={() =>
+                onAction({ action: "generateSummary", id: article.id })
+              }
+              onOpenProfile={onOpenProfile}
+            />
             <div className="story-member-status">
               <span>
                 {article.isRead ? <Check size={13} /> : <Eye size={13} />}
@@ -2250,6 +2280,8 @@ function StoryCard({
                 busy={busy}
                 onAction={onAction}
                 feedName={feedName}
+                showSummary={false}
+                onOpenProfile={onOpenProfile}
               />
             </details>
           </div>
@@ -2270,6 +2302,9 @@ function ArticleCard({
   busy,
   onAction,
   feedName,
+  showSummary = true,
+  summaryPending = false,
+  onOpenProfile,
 }: {
   article: Article;
   feedName?: string;
@@ -2281,6 +2316,9 @@ function ArticleCard({
   onOpenFolders: (id?: string) => void;
   busy: boolean;
   onAction: (action: MonitorAction) => void;
+  showSummary?: boolean;
+  summaryPending?: boolean;
+  onOpenProfile: () => void;
 }) {
   const feedbackOptions: {
     value: Feedback;
@@ -2340,6 +2378,17 @@ function ArticleCard({
                 : article.excerpt}
             </p>
           </div>
+        )}
+        {showSummary && (
+          <ArticleSummaryPanel
+            article={article}
+            busy={busy}
+            pending={summaryPending}
+            onGenerate={() =>
+              onAction({ action: "generateSummary", id: article.id })
+            }
+            onOpenProfile={onOpenProfile}
+          />
         )}
         {!feedName && (
           <div className="analysis-details">

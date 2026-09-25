@@ -21,6 +21,7 @@ import {
   setFeedFeedback,
 } from "./jev-store";
 import type { FeedInput } from "./custom-feeds";
+import { summarySnapshot } from "./summary-store";
 import type {
   ActivityReview,
   Article,
@@ -561,6 +562,17 @@ export class MonitorStore {
       })),
       profileOverride ? this.profile() : profile,
     );
+    const summaries = summarySnapshot(
+      this,
+      rows.map((row) => ({
+        id: String(row.id),
+        title: String(row.title),
+        text: String(row.text),
+        sourceName: String(row.source_name),
+        language: String(row.language),
+        contentBasis: row.content_basis as Article["contentBasis"],
+      })),
+    );
     const articles: Article[] = rows.map((r) => ({
       id: String(r.id),
       sourceId: String(r.source_id),
@@ -586,6 +598,7 @@ export class MonitorStore {
       feedback: r.feedback as Feedback | null,
       keepSeparate: !!r.keep_separate,
       folderIds: memberships.get(String(r.id)) ?? [],
+      summary: summaries.summaries.get(String(r.id))!,
       ...(!profileOverride && jev.analyses.has(String(r.id))
         ? { jev: jev.analyses.get(String(r.id))! }
         : {}),
@@ -636,6 +649,7 @@ export class MonitorStore {
       collection: this.collectionState(),
       jev: jev.state,
       customFeeds: jev.feeds,
+      summaries: summaries.state,
       activity: {
         startedAt: String(
           this.db

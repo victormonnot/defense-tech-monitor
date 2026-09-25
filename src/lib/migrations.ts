@@ -1,7 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { GENERAL_FEED, GENERAL_FEED_ID } from "./custom-feeds";
 
-const CURRENT_VERSION = 8;
+const CURRENT_VERSION = 9;
 
 export function migrate(db: DatabaseSync) {
   db.exec("BEGIN IMMEDIATE");
@@ -143,6 +143,25 @@ export function migrate(db: DatabaseSync) {
       db.prepare(
         "INSERT INTO custom_feeds (id,input,is_general) VALUES (?,?,1)",
       ).run(GENERAL_FEED_ID, JSON.stringify(GENERAL_FEED));
+    }
+    if (version < 9) {
+      db.exec(`
+        CREATE TABLE summary_attempts (
+          id TEXT PRIMARY KEY, cache_key TEXT NOT NULL, month TEXT NOT NULL,
+          reserved_nanos INTEGER NOT NULL CHECK(reserved_nanos >= 0),
+          settled_nanos INTEGER CHECK(settled_nanos >= 0),
+          input_tokens INTEGER CHECK(input_tokens >= 0), output_tokens INTEGER CHECK(output_tokens >= 0),
+          started_at TEXT NOT NULL, finished_at TEXT,
+          status TEXT NOT NULL CHECK(status IN ('running','success','failed'))
+        );
+        CREATE INDEX summary_attempts_month ON summary_attempts(month);
+        CREATE TABLE summary_cache (
+          cache_key TEXT PRIMARY KEY, attempt_id TEXT NOT NULL REFERENCES summary_attempts(id),
+          status TEXT NOT NULL CHECK(status IN ('running','success','failed')),
+          lease_expires_at TEXT, result TEXT, generated_at TEXT, error TEXT
+        );
+        PRAGMA user_version = 9;
+      `);
     }
     db.exec("COMMIT");
   } catch (error) {

@@ -10,6 +10,7 @@ import { parseFolderName } from "@/lib/folders";
 import { parseCollectionSchedule } from "@/lib/collection-state";
 import { setJevMode, retryJevFailures } from "@/lib/jev-store";
 import { parseFeedInput } from "@/lib/custom-feeds";
+import { processArticleSummary } from "@/lib/summary-service";
 import type { Feedback } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -59,6 +60,22 @@ export async function POST(request: NextRequest) {
     const store = getStore();
     let message: string | undefined;
     switch (body.action) {
+      case "generateSummary": {
+        const summary = await processArticleSummary(
+          store,
+          text(body.id, "Publication"),
+        );
+        if (summary.status === "failed")
+          return json({
+            snapshot: store.snapshot(),
+            error: summary.reason ?? "La génération du résumé a échoué.",
+          });
+        message =
+          summary.status === "ready"
+            ? "Résumé en français disponible."
+            : (summary.reason ?? "Résumé indisponible pour cette publication.");
+        break;
+      }
       case "createCustomFeed": {
         const feedId = store.saveCustomFeed(null, parseFeedInput(body.feed));
         return json({

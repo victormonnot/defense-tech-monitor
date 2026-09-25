@@ -115,6 +115,23 @@ test("scheduler activity alone preserves a profile preview while publications, r
       articles: [
         {
           ...article,
+          summary: {
+            status: "ready",
+            canGenerate: false,
+            reason: null,
+            text: "Résumé en français de la publication.",
+          },
+        },
+      ],
+    }),
+    initial,
+  );
+  assert.equal(
+    selectionSnapshotKey({
+      ...snapshot,
+      articles: [
+        {
+          ...article,
           jev: {
             score: 3,
             confidence: 0.9,

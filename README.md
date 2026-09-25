@@ -15,7 +15,7 @@ npm run collect
 npm run dev
 ```
 
-Open the address shown in the terminal, usually `http://127.0.0.1:3000`. The SQLite database is created automatically at `data/monitor.sqlite`. The default keyword mode requires no API key and makes no paid calls. Jev requires separate local configuration and explicit activation.
+Open the address shown in the terminal, usually `http://127.0.0.1:3000`. The SQLite database is created automatically at `data/monitor.sqlite`. The default keyword mode requires no API key and makes no paid calls. Jev and on-demand French summaries each require separate local configuration.
 
 To run the checks and a production build locally:
 
@@ -109,6 +109,25 @@ Usage is tracked per UTC calendar month in this database, separately from your T
 
 Failures pause processing and show a safe error. Use the explicit retry action after addressing the issue; retries may incur another charge and retain reservations from uncertain attempts. There are no hidden HTTP retries. The application stores decisions and usage locally, and never stores the API key in SQLite. No text-generation provider is configured by this integration.
 
+### Optional French summaries
+
+Use **Résumer en français** on a publication to generate a short factual summary of its available text. Summaries use OpenAI independently of Jev. Configure your Git-ignored `.env.local` and restart the server:
+
+```dotenv
+OPENAI_API_KEY=your_key_here
+DTM_SUMMARY_MONTHLY_BUDGET_USD=1
+```
+
+The example cap can be replaced with your own limit from 0 to 100 USD, with at most two decimal places. The default is 0. A key and a positive cap are required; adding them does not start generation. Only an explicit summary request calls the provider. **Profil de veille** shows the configuration status and separate summary budget. The API key remains on the server.
+
+Generation sends the original title, source name, language, content provenance and collected text to the official OpenAI Responses endpoint. It does not send feed briefs, interests, feedback, folders or reading history. The integration uses the pinned `gpt-4.1-mini-2025-04-14` model, structured output, a maximum of 500 output tokens and `store: false`. See the [model documentation](https://developers.openai.com/api/docs/models/gpt-4.1-mini) and [structured output guide](https://developers.openai.com/api/docs/guides/structured-outputs).
+
+Metadata-only publications and texts shorter than 400 characters are ineligible. The model can also report that a longer text contains insufficient information. Requests are bounded to 32 KB of serialized JSON, shortening the body when necessary. Instructions require a short French paraphrase based only on the supplied text, preserving attribution and uncertainty. Source material is treated as untrusted data. Invalid, incomplete or refused outputs are not displayed as summaries. This is not claim verification, and the available text may be an excerpt rather than the complete article. Original titles, excerpts and source links remain available; the press review and its Markdown export continue to use source excerpts.
+
+A summary is cached across feeds. Changing feed settings, feedback or read/saved state does not regenerate it. Cache keys include the exact input, prompt and model; changing the source text or other transmitted fields makes the earlier result inapplicable. Old results never appear as summaries of a changed input. Reading pages and polling make no generation requests. A failed request can be retried explicitly from its article; there are no automatic retries.
+
+The local ledger tracks each request against the UTC month in which it started. At the documented standard rates of $0.40 per million input tokens and $1.60 per million output tokens, a transaction reserves $0.0264 before each request (64,000 input tokens and 500 output tokens). Valid responses settle that estimate with reported usage; input cache discounts are conservatively ignored. Failed or interrupted requests with unknown billing keep their reservation, including across retries and restarts. Known failures before HTTP cost nothing. Insufficient remaining budget blocks another request, while cached summaries remain readable. This cap is independent of Jev, your OpenAI balance and other applications; it is a local estimate at the documented rates, not an account-wide spending limit or billing statement.
+
 ### Organizing publications
 
 Create and rename folders under **Folders — Dossiers**. Use **Classer** on a publication to add it to one or more folders, or remove it from a folder. Each publication in a grouped announcement has its own assignments. Folder membership is independent of bookmarks, read state, feedback, and change acknowledgements; filing an article does not alter your personal selection.
@@ -172,10 +191,10 @@ Collection respects `robots.txt`, limits response size, applies timeouts, and va
 - Full articles are not republished. The application does not bypass paywalls, transcribe videos, or invent summaries from titles.
 - Classification defaults to deterministic keyword rules, with limitations around synonyms and languages. Optional Jev results supplement selection and editorial labels; theme tags remain rule-based. Matches indicate relevance to a profile, never the reliability of a claim.
 - Repeated imports of a publication from the same source are detected through its identifier or normalized URL. Cross-source grouping requires the same known language, publication dates no more than seven days apart, and matching ordered title words after typographic normalization, including specific terms beyond generic defense vocabulary. When text is available, all collected text must also match in word order, not just the displayed excerpt. All members must match each other; a chain of loosely related articles is insufficient. Missing dates, different languages, changed numbers, follow-up signals, and different or incomplete text prevent grouping. Weaker title matches remain separate with comparison hints. This favors missed matches over hiding new information. It does not translate titles, fetch additional article bodies, or verify claims.
-- This version does not include exhaustive archive imports, generated summaries, alerts, or audio.
+- This version does not include exhaustive archive imports, alerts, or audio.
 - The database and `.env` files are excluded from Git. The example configuration contains no secrets. To back up local data, stop the application and copy the `data/` directory.
 
-Existing databases are upgraded automatically to schema version 8 when opened. Migrations add content provenance, a per-publication grouping preference, revision-based change tracking, folder storage, collection scheduling, optional Jev cache/accounting, and editable feeds with independent feedback while preserving collected publications, read and saved states, feedback, source activation settings, and the keyword profile. Groups are derived from the current publications; they do not merge or delete database records.
+Existing databases are upgraded automatically to schema version 9 when opened. Migrations add content provenance, a per-publication grouping preference, revision-based change tracking, folder storage, collection scheduling, optional Jev cache/accounting, editable feeds with independent feedback, and a separate summary cache and usage ledger while preserving existing publications and personal state. Groups are derived from the current publications; they do not merge or delete database records.
 
 ## Architecture
 
@@ -196,6 +215,9 @@ src/lib/custom-feeds.ts           Feed contracts, input validation, and editable
 src/lib/jev-client.ts             Pinned TypeSafe requests, bounded inputs, validated responses
 src/lib/jev-store.ts              Cached decisions, transactional reservations, usage ledger
 src/lib/jev-worker.ts             Optional background classification and explicit recovery
+src/lib/summary-client.ts         Bounded OpenAI requests and source-based French summaries
+src/lib/summary-store.ts          Summary cache, reservations, and separate usage ledger
+src/lib/summary-service.ts        On-demand generation and explicit retry
 src/lib/profile.ts                Profile validation and selection text scope
 src/lib/selection.ts              Personal corrections and evaluation of raw rule decisions
 src/lib/activity.ts               Change filters and bounded revision acknowledgements
@@ -210,4 +232,4 @@ scripts/collect.ts                Command-line collection
 tests/                            RSS/Atom, duplicates, selection, and error cases
 ```
 
-Collection, classification, and any future summary generation are separate concerns. The synchronous `Classifier` contract handles local rules; remote Jev requests run separately and persist their results before snapshots read them. A future text-generation integration would require its own configuration, usage limits, and evaluation.
+Collection, classification, and summary generation are separate concerns. The synchronous `Classifier` contract handles local rules; remote Jev requests run in the background. OpenAI summaries run only on demand, with their own configuration, usage ledger and cache. Snapshots read persisted results without calling either provider.

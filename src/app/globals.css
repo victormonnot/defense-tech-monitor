@@ -3042,6 +3042,222 @@ body {
 .profile-aside {
   min-width: 0;
 }
+.summary-settings {
+  min-width: 0;
+  margin-bottom: 20px;
+}
+.summary-provider,
+.summary-budget-heading,
+.summary-settings-status > p,
+.article-summary-heading,
+.article-summary-provenance,
+.article-summary-pending {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+.summary-provider {
+  color: #7184a0;
+  margin: 13px 0 10px;
+  font-size: 0.75rem;
+}
+.summary-provider > span:first-child {
+  background: #eaf2f5;
+  color: #477383;
+  border-radius: 4px;
+  padding: 3px 7px;
+}
+.summary-transmission,
+.summary-budget-help,
+.summary-settings-status {
+  font-size: 0.75rem;
+  color: #637b94;
+  line-height: 1.7;
+}
+.summary-transmission {
+  padding-left: 10px;
+  border-left: 2px solid #d7e5eb;
+}
+.summary-configuration {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: #fffcf6;
+  border: 1px solid #eadfc9;
+  border-radius: 7px;
+  color: #866a48;
+  padding: 12px;
+  margin-top: 16px;
+  font-size: 0.875rem;
+}
+.summary-configuration > svg {
+  margin-top: 3px;
+}
+.summary-configuration > div {
+  min-width: 0;
+}
+.summary-configuration p {
+  margin-top: 5px;
+  overflow-wrap: anywhere;
+}
+.summary-configuration code {
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+.summary-budget {
+  margin-top: 19px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.summary-budget-heading {
+  justify-content: space-between;
+  color: #4f6c86;
+  font-size: 0.75rem;
+}
+.summary-budget-heading > strong {
+  font-weight: 600;
+}
+.summary-budget progress {
+  display: block;
+  width: 100%;
+  height: 7px;
+  margin-top: 12px;
+  accent-color: #5b8c9b;
+}
+.summary-budget-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 24px;
+  margin: 14px 0 9px;
+  color: #6b839b;
+  font-size: 0.75rem;
+}
+.summary-budget-values dd {
+  margin: 3px 0 0;
+  color: #4c7189;
+  font-weight: 600;
+}
+.summary-budget-help > summary {
+  cursor: pointer;
+  color: #557d93;
+  padding: 3px 0;
+}
+.summary-budget-help > p {
+  margin-top: 5px;
+}
+.summary-settings-status {
+  margin-top: 15px;
+}
+.summary-settings-status > p + p {
+  margin-top: 4px;
+}
+.summary-settings-status > .summary-budget-warning {
+  color: #927043;
+  margin-top: 7px;
+}
+.article-summary-control {
+  margin-top: 12px;
+}
+.article-summary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid #d8e4eb;
+  border-radius: 6px;
+  background: #f4f9fb;
+  color: #47748a;
+  padding: 7px 10px;
+  font-size: 0.875rem;
+  min-height: 38px;
+}
+.article-summary-button:hover:not(:disabled) {
+  border-color: #a8c3d2;
+  background: #edf5f8;
+}
+.article-summary-reason {
+  font-size: 0.75rem;
+  color: #718599;
+  margin-top: 6px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.article-summary-reason.is-error {
+  color: #946840;
+}
+.article-summary-settings-link {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 0;
+  background: transparent;
+  color: #52738f;
+  font-size: 0.75rem;
+  text-align: left;
+}
+.article-summary-pending {
+  margin: 14px 0;
+  color: #537d91;
+  font-size: 0.875rem;
+}
+.article-summary-unavailable {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  font-size: 0.75rem;
+  color: #7d8c9e;
+  line-height: 1.7;
+  margin-top: 13px;
+}
+.article-summary-unavailable > svg {
+  margin-top: 3px;
+}
+.article-summary-ready {
+  border: 1px solid #dce8ee;
+  border-radius: 8px;
+  padding: 14px 16px;
+  background: #f5fafb;
+  margin-top: 15px;
+}
+.article-summary-heading {
+  color: #446e85;
+  font-size: 0.875rem;
+}
+.article-summary-heading > strong {
+  font-weight: 600;
+}
+.article-summary-text {
+  margin-top: 9px;
+  color: #465f78;
+  font-size: 0.875rem;
+  line-height: 1.8;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+.article-summary-provenance {
+  color: #718b9c;
+  font-size: 0.6875rem;
+  margin-top: 11px;
+}
+.article-summary-details {
+  color: #71899b;
+  font-size: 0.75rem;
+  margin-top: 6px;
+  line-height: 1.7;
+}
+.article-summary-details > summary {
+  cursor: pointer;
+  color: #5e8197;
+}
+.article-summary-details > p {
+  margin-top: 5px;
+}
+.story-member > .article-summary-ready,
+.story-member > .article-summary-control,
+.story-member > .article-summary-unavailable {
+  margin-bottom: 12px;
+}
 .jev-panel {
   margin-bottom: 20px;
 }

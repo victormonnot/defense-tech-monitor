@@ -37,7 +37,12 @@ function removeJevSchema(db: DatabaseSync) {
 }
 
 function removeCustomFeedSchema(db: DatabaseSync) {
+  removeSummarySchema(db);
   db.exec("DROP TABLE feed_feedback; DROP TABLE custom_feeds;");
+}
+
+function removeSummarySchema(db: DatabaseSync) {
+  db.exec("DROP TABLE summary_cache; DROP TABLE summary_attempts;");
 }
 
 test("version 1 upgrades preserve publications, personal state, profile and source choices", (t) => {
@@ -96,7 +101,7 @@ test("version 1 upgrades preserve publications, personal state, profile and sour
   const upgraded = new MonitorStore(path);
   assert.equal(
     upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
-    8,
+    9,
   );
   assert.deepEqual(upgraded.snapshot().articles, before);
   assert.equal(upgraded.snapshot().activity.newCount, 0);
@@ -127,7 +132,7 @@ test("fresh migrations are idempotent and reject newer schemas without downgradi
   try {
     migrate(db);
     migrate(db);
-    assert.equal(db.prepare("PRAGMA user_version").get()?.user_version, 8);
+    assert.equal(db.prepare("PRAGMA user_version").get()?.user_version, 9);
     const startedAt = db
       .prepare("SELECT value FROM settings WHERE key='activity_started_at'")
       .get()?.value;
@@ -189,7 +194,7 @@ test("version 2 upgrades add reversible grouping preferences without changing ex
   try {
     assert.equal(
       upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
-      8,
+      9,
     );
     const after = upgraded.snapshot();
     assert.deepEqual(
@@ -258,7 +263,7 @@ test("version 3 upgrades baseline existing articles without changing personal or
     const after = upgraded.snapshot();
     assert.equal(
       upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
-      8,
+      9,
     );
     assert.deepEqual(
       { ...after, activity: undefined },
@@ -326,7 +331,7 @@ test("version 4 upgrades preserve publications, activity and preferences without
   try {
     assert.equal(
       upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
-      8,
+      9,
     );
     assert.deepEqual(upgraded.snapshot(), before);
     assert.deepEqual(upgraded.snapshot().folders, []);
@@ -376,7 +381,7 @@ test("version 5 upgrades add a paused schedule without changing articles, dossie
   try {
     assert.equal(
       upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
-      8,
+      9,
     );
     assert.deepEqual(upgraded.snapshot(), before);
     assert.deepEqual(upgraded.snapshot().collection, {
@@ -430,7 +435,7 @@ test("version 6 upgrades default Jev to off without changing existing data or st
   try {
     assert.equal(
       upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
-      8,
+      9,
     );
     assert.deepEqual(upgraded.snapshot(), before);
     assert.equal(upgraded.snapshot().jev?.mode, "off");
@@ -500,7 +505,7 @@ test("version 7 upgrades seed only the general feed and preserve cached judgment
   try {
     assert.equal(
       upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
-      8,
+      9,
     );
     assert.deepEqual(
       upgraded.db.prepare("SELECT * FROM jev_cache").all(),
@@ -518,6 +523,112 @@ test("version 7 upgrades seed only the general feed and preserve cached judgment
         ?.count,
       0,
     );
+    migrate(upgraded.db);
+    assert.deepEqual(upgraded.snapshot(), before);
+  } finally {
+    upgraded.db.close();
+  }
+});
+
+test("version 8 upgrades add empty summary tables while preserving every existing publication and preference", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "dtm-migration-v8-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const path = join(directory, "monitor.sqlite");
+  const old = new MonitorStore(path);
+  old.upsertEntries(
+    "brave1",
+    [
+      {
+        guid: "synthetic-v8",
+        url: "https://example.test/v8",
+        title: "Synthetic drone publication",
+        publishedAt: null,
+        text: "Synthetic available source material about navigation sensors and a prototype demonstration. ".repeat(
+          8,
+        ),
+        excerpt: "Synthetic excerpt",
+        language: "en",
+        format: "article",
+        contentHash: "v8-hash",
+      },
+    ],
+    "2026-09-25T12:00:00Z",
+  );
+  const article = old.snapshot().articles[0];
+  old.setArticleState(article.id, "saved", true);
+  old.setArticleState(article.id, "is_read", true);
+  old.setArticleState(article.id, "feedback", "relevant");
+  old.acknowledgeChanges([article]);
+  const folder = old.createFolder("Synthetic dossier");
+  old.setArticleFolder(article.id, folder, true);
+  const general = old.listCustomFeeds()[0];
+  const custom = old.saveCustomFeed(null, {
+    ...general,
+    name: "Synthetic feed",
+    instructions: "Synthetic custom interest",
+  });
+  old.setFeedFeedback(article.id, custom, "off_topic");
+  old.setCustomFeedArchived(custom, true);
+  const config = {
+    apiKey: "synthetic-never-sent",
+    monthlyBudgetUsd: 2,
+    error: null,
+  };
+  setJevMode(old, "compare", config);
+  const claim = claimJev(old, config)!;
+  settleJev(old, claim, {
+    score: 2.4,
+    confidence: 0.9,
+    kind: "technical",
+    kindConfidence: 0.9,
+    model: JEV_MODEL,
+    inputTokens: 1000,
+  });
+  const before = old.snapshot();
+  const tables = [
+    "articles",
+    "sources",
+    "settings",
+    "folders",
+    "article_folders",
+    "custom_feeds",
+    "feed_feedback",
+    "jev_cache",
+    "jev_attempts",
+    "collection_schedule",
+    "collection_run",
+  ];
+  const rows = tables.map((table) =>
+    old.db.prepare(`SELECT * FROM ${table}`).all(),
+  );
+  removeSummarySchema(old.db);
+  old.db.exec("PRAGMA user_version=8");
+  old.db.close();
+  const upgraded = new MonitorStore(path);
+  try {
+    assert.equal(
+      upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
+      9,
+    );
+    assert.deepEqual(upgraded.snapshot(), before);
+    assert.deepEqual(
+      tables.map((table) =>
+        upgraded.db.prepare(`SELECT * FROM ${table}`).all(),
+      ),
+      rows,
+    );
+    assert.equal(
+      upgraded.db
+        .prepare("SELECT COUNT(*) AS count FROM summary_attempts")
+        .get()?.count,
+      0,
+    );
+    assert.equal(
+      upgraded.db.prepare("SELECT COUNT(*) AS count FROM summary_cache").get()
+        ?.count,
+      0,
+    );
+    assert.equal(upgraded.snapshot().summaries?.eligible, 1);
     migrate(upgraded.db);
     assert.deepEqual(upgraded.snapshot(), before);
   } finally {

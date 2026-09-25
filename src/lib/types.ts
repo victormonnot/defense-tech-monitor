@@ -1,6 +1,7 @@
 import type { StoryGroup, StoryRelation } from "./stories";
 import type { JevAnalysis, JevMode, JevState } from "./jev-types";
 import type { CustomFeed, FeedInput } from "./custom-feeds";
+import type { ArticleSummary, SummaryState } from "./summary-types";
 
 export type Feedback = "relevant" | "off_topic" | "seen";
 export type SourceStatus = "pending" | "ok" | "empty" | "error" | "unsupported";
@@ -48,6 +49,7 @@ export interface Article {
   jev?: JevAnalysis;
   feedAnalyses?: Record<string, JevAnalysis>;
   feedFeedback?: Record<string, Feedback | null>;
+  summary?: ArticleSummary;
 }
 
 export interface Folder {
@@ -124,6 +126,7 @@ export interface Snapshot {
   collection: CollectionState;
   jev?: JevState;
   customFeeds?: CustomFeed[];
+  summaries?: SummaryState;
   activity: {
     startedAt: string;
     lastReviewedAt: string | null;
@@ -140,6 +143,7 @@ export interface ActivityReview {
 
 export type MonitorAction =
   | { action: "collect" }
+  | { action: "generateSummary"; id: string }
   | { action: "createCustomFeed"; feed: FeedInput }
   | {
       action: "updateCustomFeed";

@@ -48,6 +48,7 @@ export function selectionSnapshotKey(
         jev: _jev,
         feedAnalyses: _analyses,
         feedFeedback: _feedback,
+        summary: _summary,
         ...article
       }) => article,
     ),

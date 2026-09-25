@@ -32,15 +32,26 @@ The application is intended for local, single-user use. The server binds to the 
 
 The interface currently uses French labels:
 
-- **For me — Pour moi**: publications matching your profile, excluding items marked off-topic or already seen.
+- **For me — Pour moi**: publications matching your profile, plus those explicitly marked relevant. Items marked off-topic or already seen are excluded.
 - **Full feed — Tout le flux**: all collected publications, with search and filters for source, topic, language, and format.
 - **Saved — Sauvegardés**: bookmarked publications, preserved across restarts.
+- **Evaluate — Évaluer**: review unjudged publications, find relevant items missed by the rules, inspect rule matches you marked off-topic, or revisit all your feedback. Publications are displayed individually in this view.
 - **Sources**: add websites or feeds, edit their configuration, enable or disable collection, and inspect the collection method, address, status, and errors.
-- **Monitoring profile — Profil de veille**: keywords, exclusions, and the minimum number of matches required. A single exclusion keyword removes a publication from the selection without removing it from the full feed.
+- **Monitoring profile — Profil de veille**: keywords, exclusions, the minimum number of matches required, and the content used for selection. An exclusion keyword rejects an article under the rules; explicitly marking it relevant overrides that decision for your personal feed.
 
 Start collection with **Refresh sources — Actualiser les sources** or `npm run collect`. Collection is not scheduled automatically. By default, a source checked within the last 15 minutes is skipped. Set `DTM_COLLECTION_INTERVAL_MINUTES` to change this interval; source access restrictions and crawl delays still apply.
 
-Feedback is saved as relevant, off-topic, or already seen. The profile view reports publications you marked relevant that the rules missed, and publications selected by the rules that you marked off-topic. Feedback does not trigger automatic model training.
+Feedback corrects your feed immediately: **Relevant — Pertinent** retains a publication even below the keyword threshold, while **Off-topic — Hors sujet** and **Already seen — Déjà vu** remove it from For me. Click the selected feedback button again to clear the correction and return to the rule-based decision. The article and its read/saved states remain available in the full feed. Feedback does not train a model or change your keywords automatically.
+
+### Evaluating and adjusting selection
+
+The evaluation view includes all unjudged publications, including those outside For me, so you can find missed topics as well as broad matches. Its mistake filters compare your relevance judgments with the raw keyword decision, before applying manual corrections. An article marked relevant can therefore remain listed as a rule miss even though your correction puts it in For me.
+
+Precision is the share of judged rule matches marked relevant. Recall is the share of publications you marked relevant that the rules would select. These figures describe only your judged sample, not the entire feed or the reliability of any claim. Unknown ratios are shown as unavailable; already-seen feedback is counted separately and supplies no relevance label.
+
+The default selection scope remains **All collected text**, including feed text beyond the displayed excerpt. You can instead choose **Title and available excerpt** to reduce matches caused by incidental body mentions. This can also remove useful matches; missing excerpts are never reconstructed from article bodies, and title-only sources still use their titles. Topic labels use the same selected scope. Neither mode downloads additional content.
+
+Use **Preview changes — Prévisualiser les changements** to compare a draft profile with the saved one. The preview shows selection counts, entering/leaving publications, and changes to rule mistakes on existing judgments. It uses the same classification and feedback rules as saving, but does not write the profile, articles, or personal state. Editing the draft or changing article data invalidates the preview. **Save profile — Enregistrer mon profil** applies the changes explicitly.
 
 ### Similar announcements
 
@@ -94,6 +105,8 @@ src/lib/collector.ts   Collection, caching, and error handling
 src/lib/store.ts       SQLite persistence and personal state
 src/lib/migrations.ts  Versioned database upgrades
 src/lib/classifier.ts  Replaceable classification and explicit rules
+src/lib/profile.ts     Profile validation and selection text scope
+src/lib/selection.ts   Personal corrections and evaluation of raw rule decisions
 src/lib/stories.ts     Conservative announcement grouping and comparison hints
 src/lib/story-feed.ts  Group presentation after view and search filters
 src/app/api/monitor/   Local reads and mutations

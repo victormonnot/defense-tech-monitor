@@ -8,7 +8,16 @@ import type { FeedEntry } from "./feed";
 import { migrate } from "./migrations";
 import { resolveCollection } from "./connectors";
 import { buildStories } from "./stories";
-import type { Article, Feedback, Profile, Snapshot, Source } from "./types";
+import { evaluateSelection, matchesProfile } from "./selection";
+import { classificationText } from "./profile";
+import type {
+  Article,
+  Feedback,
+  Profile,
+  ProfilePreview,
+  Snapshot,
+  Source,
+} from "./types";
 
 type Row = Record<string, string | number | null>;
 
@@ -250,9 +259,36 @@ export class MonitorStore {
     return { added, updated };
   }
 
-  snapshot(): Snapshot {
+  previewProfile(profile: Profile): ProfilePreview {
+    const current = this.snapshot();
+    const preview = this.snapshot(profile);
+    const currentIds = new Set(
+      current.articles
+        .filter((article) => matchesProfile(article, current.profile))
+        .map((article) => article.id),
+    );
+    const previewIds = new Set(
+      preview.articles
+        .filter((article) => matchesProfile(article, profile))
+        .map((article) => article.id),
+    );
+    return {
+      profile,
+      selected: preview.stats.selected,
+      currentSelected: current.stats.selected,
+      evaluation: preview.evaluation,
+      entered: preview.articles.filter(
+        (article) => previewIds.has(article.id) && !currentIds.has(article.id),
+      ),
+      exited: preview.articles.filter(
+        (article) => currentIds.has(article.id) && !previewIds.has(article.id),
+      ),
+    };
+  }
+
+  snapshot(profileOverride?: Profile): Snapshot {
     const sources = this.sources();
-    const profile = this.profile();
+    const profile = profileOverride ?? this.profile();
     const rows = this.db
       .prepare(
         "SELECT a.*,s.name AS source_name FROM articles a JOIN sources s ON s.id=a.source_id ORDER BY COALESCE(a.published_at,a.collected_at) DESC",
@@ -274,13 +310,20 @@ export class MonitorStore {
       saved: !!r.saved,
       feedback: r.feedback as Feedback | null,
       keepSeparate: !!r.keep_separate,
-      ...this.classifier.classify(`${r.title}\n${r.text}`, profile),
+      ...this.classifier.classify(
+        classificationText(
+          {
+            title: String(r.title),
+            text: String(r.text),
+            excerpt: r.excerpt as string | null,
+          },
+          profile,
+        ),
+        profile,
+      ),
     }));
-    const selected = articles.filter(
-      (a) =>
-        a.score >= profile.minScore &&
-        a.feedback !== "off_topic" &&
-        a.feedback !== "seen",
+    const selected = articles.filter((article) =>
+      matchesProfile(article, profile),
     );
     return {
       articles,
@@ -303,15 +346,7 @@ export class MonitorStore {
         unread: articles.filter((a) => !a.isRead).length,
         saved: articles.filter((a) => a.saved).length,
       },
-      evaluation: {
-        reviewed: articles.filter((a) => a.feedback).length,
-        missedRelevant: articles.filter(
-          (a) => a.feedback === "relevant" && a.score < profile.minScore,
-        ).length,
-        selectedOffTopic: articles.filter(
-          (a) => a.feedback === "off_topic" && a.score >= profile.minScore,
-        ).length,
-      },
+      evaluation: evaluateSelection(articles, profile),
       lastCollectionAt:
         sources
           .map((s) => s.lastCheckedAt)

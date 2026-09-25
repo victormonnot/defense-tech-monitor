@@ -33,14 +33,20 @@ import type {
   Feedback,
   MonitorAction,
   Profile,
+  ProfilePreview,
   Snapshot,
   Source,
   SourceStatus,
 } from "@/lib/types";
 import type { StoryGroup } from "@/lib/stories";
 import { buildFeedItems } from "@/lib/story-feed";
+import {
+  matchesProfile,
+  matchesEvaluation,
+  type EvaluationFilter,
+} from "@/lib/selection";
 
-type View = "personal" | "all" | "saved" | "sources" | "profile";
+type View = "personal" | "all" | "saved" | "evaluation" | "sources" | "profile";
 type Notice = { kind: "success" | "error"; text: string } | null;
 type RelatedPublication = { article: Article; reason: string };
 
@@ -48,6 +54,7 @@ const views = [
   { id: "personal", label: "Pour moi", icon: Compass },
   { id: "all", label: "Tout le flux", icon: Radio },
   { id: "saved", label: "Sauvegardés", icon: Bookmark },
+  { id: "evaluation", label: "Évaluer", icon: CheckCheck },
   { id: "sources", label: "Sources", icon: Rss },
   { id: "profile", label: "Profil de veille", icon: Settings2 },
 ] as const;
@@ -73,6 +80,12 @@ const viewCopy: Record<
     title: "Sauvegardés",
     description:
       "Vos publications sauvegardées, pour y revenir quand vous en avez besoin.",
+  },
+  evaluation: {
+    eyebrow: "VOS RETOURS",
+    title: "Évaluer la sélection",
+    description:
+      "Repérez les publications manquées ou retenues à tort par vos règles et ajustez votre veille.",
   },
   sources: {
     eyebrow: "VOS SOURCES",
@@ -121,12 +134,20 @@ function languageLabel(value: string) {
   return known[value] ?? value;
 }
 
-function matchesProfile(article: Article, profile: Profile) {
-  return (
-    article.score >= profile.minScore &&
-    article.feedback !== "off_topic" &&
-    article.feedback !== "seen"
-  );
+const evaluationFilters: { id: EvaluationFilter; label: string }[] = [
+  { id: "unreviewed", label: "À évaluer" },
+  { id: "missed", label: "Manqués par les règles" },
+  { id: "off_topic", label: "Retenus mais hors sujet" },
+  { id: "reviewed", label: "Tous les retours" },
+];
+
+function percentage(value: number | null) {
+  return value === null
+    ? "—"
+    : new Intl.NumberFormat("fr-FR", {
+        style: "percent",
+        maximumFractionDigits: 0,
+      }).format(value);
 }
 
 function splitKeywords(value: string) {
@@ -151,11 +172,18 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
   const [themeFilter, setThemeFilter] = useState("");
   const [formatFilter, setFormatFilter] = useState("");
   const [groupStories, setGroupStories] = useState(true);
+  const [evaluationFilter, setEvaluationFilter] =
+    useState<EvaluationFilter>("unreviewed");
+  const [preview, setPreview] = useState<ProfilePreview | null>(null);
+  const previewRequest = useRef(0);
   const [keywords, setKeywords] = useState(data.profile.keywords.join(", "));
   const [excludeKeywords, setExcludeKeywords] = useState(
     data.profile.excludeKeywords.join(", "),
   );
   const [minScore, setMinScore] = useState(String(data.profile.minScore));
+  const [matchScope, setMatchScope] = useState<
+    NonNullable<Profile["matchScope"]>
+  >(data.profile.matchScope ?? "all_text");
   const [sourceName, setSourceName] = useState("");
   const [siteUrl, setSiteUrl] = useState("");
   const [feedUrl, setFeedUrl] = useState("");
@@ -184,6 +212,11 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
       if (view === "personal" && !matchesProfile(article, data.profile))
         return false;
       if (view === "saved" && !article.saved) return false;
+      if (
+        view === "evaluation" &&
+        !matchesEvaluation(article, data.profile, evaluationFilter)
+      )
+        return false;
       if (sourceFilter && article.sourceId !== sourceFilter) return false;
       if (languageFilter && article.language !== languageFilter) return false;
       if (themeFilter && !article.themes.includes(themeFilter)) return false;
@@ -207,11 +240,16 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
     languageFilter,
     themeFilter,
     formatFilter,
+    evaluationFilter,
   ]);
 
   const feedItems = useMemo(
-    () => buildFeedItems(articles, groupStories ? data.stories.groups : []),
-    [articles, groupStories, data.stories.groups],
+    () =>
+      buildFeedItems(
+        articles,
+        groupStories && view !== "evaluation" ? data.stories.groups : [],
+      ),
+    [articles, groupStories, data.stories.groups, view],
   );
   const groupedCount = feedItems.filter((item) => item.group).length;
   const relatedByArticle = useMemo(() => {
@@ -239,6 +277,7 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
     successMessage?: string,
   ) {
     if (pending) return false;
+    invalidatePreview();
     setPending(key);
     setNotice(null);
     try {
@@ -272,6 +311,63 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
     } finally {
       setPending(null);
     }
+  }
+
+  function invalidatePreview() {
+    previewRequest.current += 1;
+    setPreview(null);
+  }
+
+  function draftProfile(): Profile {
+    return {
+      keywords: splitKeywords(keywords),
+      excludeKeywords: splitKeywords(excludeKeywords),
+      minScore: Number(minScore),
+      matchScope,
+    };
+  }
+
+  async function previewProfile() {
+    if (pending) return;
+    const request = ++previewRequest.current;
+    setPending("previewProfile");
+    setPreview(null);
+    setNotice(null);
+    try {
+      const response = await fetch("/api/monitor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "previewProfile",
+          profile: draftProfile(),
+        }),
+      });
+      const result = (await response.json()) as {
+        preview?: ProfilePreview;
+        error?: string;
+      };
+      if (!response.ok || !result.preview)
+        throw new Error(
+          result.error || "La prévisualisation a échoué. Réessayez.",
+        );
+      if (request === previewRequest.current) setPreview(result.preview);
+    } catch (error) {
+      if (request === previewRequest.current)
+        setNotice({
+          kind: "error",
+          text:
+            error instanceof Error
+              ? error.message
+              : "La prévisualisation a échoué. Réessayez.",
+        });
+    } finally {
+      setPending(null);
+    }
+  }
+
+  function openEvaluation(filter: EvaluationFilter) {
+    setEvaluationFilter(filter);
+    changeView("evaluation");
   }
 
   function resetFilters() {
@@ -329,11 +425,7 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
     await mutate(
       {
         action: "updateProfile",
-        profile: {
-          keywords: splitKeywords(keywords),
-          excludeKeywords: splitKeywords(excludeKeywords),
-          minScore: Number(minScore),
-        },
+        profile: draftProfile(),
       },
       "updateProfile",
       "Profil enregistré. La sélection a été recalculée.",
@@ -484,7 +576,10 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
             />
           </div>
 
-          {(view === "personal" || view === "all" || view === "saved") && (
+          {(view === "personal" ||
+            view === "all" ||
+            view === "saved" ||
+            view === "evaluation") && (
             <>
               {view === "personal" && (
                 <div className="selection-note">
@@ -504,12 +599,53 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                       {data.profile.minScore > 1 ? "s" : ""} minimale
                       {data.profile.minScore > 1 ? "s" : ""}
                     </strong>
-                    .
+                    , ainsi que sur vos retours.
                   </span>
                   <button type="button" onClick={() => changeView("profile")}>
                     Ajuster mon profil <ArrowRight size={14} />
                   </button>
                 </div>
+              )}
+              {view === "evaluation" && (
+                <section
+                  className="evaluation-controls"
+                  aria-label="Parcours d’évaluation"
+                >
+                  <div
+                    className="evaluation-tabs"
+                    role="group"
+                    aria-label="Publications à évaluer"
+                  >
+                    {evaluationFilters.map(({ id, label }) => (
+                      <button
+                        key={id}
+                        type="button"
+                        aria-pressed={evaluationFilter === id}
+                        className={`evaluation-tab ${evaluationFilter === id ? "is-selected" : ""}`}
+                        onClick={() => setEvaluationFilter(id)}
+                      >
+                        {label}
+                        <span>
+                          {
+                            data.articles.filter((article) =>
+                              matchesEvaluation(article, data.profile, id),
+                            ).length
+                          }
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                  <p>
+                    « Pertinent » ajoute la publication à Pour moi. « Hors sujet
+                    » et « Déjà vu » la retirent. Cliquez à nouveau sur votre
+                    retour pour réappliquer les règles.
+                  </p>
+                  <p>
+                    Les écarts ci-dessous portent sur les règles, avant vos
+                    corrections. « Déjà vu » ne mesure pas la pertinence. Chaque
+                    publication est affichée séparément pour l’évaluer.
+                  </p>
+                </section>
               )}
               <section className="feed-section" aria-labelledby="feed-title">
                 <div className="section-heading">
@@ -519,7 +655,11 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                         ? "Votre sélection"
                         : view === "saved"
                           ? "Vos sauvegardes"
-                          : "Toutes les publications"}
+                          : view === "evaluation"
+                            ? evaluationFilters.find(
+                                (filter) => filter.id === evaluationFilter,
+                              )?.label
+                            : "Toutes les publications"}
                     </h2>
                     <span className="count-badge">{articles.length}</span>
                   </div>
@@ -603,16 +743,18 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                   </div>
                 </div>
                 <div className="feed-display-controls">
-                  <label className="grouping-toggle">
-                    <input
-                      type="checkbox"
-                      checked={groupStories}
-                      onChange={(event) =>
-                        setGroupStories(event.target.checked)
-                      }
-                    />
-                    Regrouper les annonces similaires
-                  </label>
+                  {view !== "evaluation" && (
+                    <label className="grouping-toggle">
+                      <input
+                        type="checkbox"
+                        checked={groupStories}
+                        onChange={(event) =>
+                          setGroupStories(event.target.checked)
+                        }
+                      />
+                      Regrouper les annonces similaires
+                    </label>
+                  )}
                   <p className="feed-count" role="status">
                     {articles.length} publication
                     {articles.length > 1 ? "s" : ""}
@@ -641,6 +783,7 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                         key={item.id}
                         articles={item.articles}
                         group={item.group}
+                        matchScope={data.profile.matchScope}
                         relatedByArticle={relatedByArticle}
                         busy={busy}
                         onAction={onAction}
@@ -649,6 +792,7 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                       <ArticleCard
                         key={item.id}
                         article={item.articles[0]}
+                        matchScope={data.profile.matchScope}
                         related={relatedByArticle.get(item.articles[0].id)}
                         busy={busy}
                         onAction={onAction}
@@ -667,20 +811,24 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                       <h3>
                         {hasFilters
                           ? "Aucune publication ne correspond."
-                          : view === "saved"
-                            ? "Votre bibliothèque commence ici."
-                            : data.articles.length === 0
-                              ? "Prêt pour votre première collecte."
-                              : "Votre sélection est encore vide."}
+                          : view === "evaluation"
+                            ? "Aucune publication dans cette catégorie."
+                            : view === "saved"
+                              ? "Votre bibliothèque commence ici."
+                              : data.articles.length === 0
+                                ? "Prêt pour votre première collecte."
+                                : "Votre sélection est encore vide."}
                       </h3>
                       <p>
                         {hasFilters
                           ? "Essayez un autre mot-clé ou élargissez vos filtres."
-                          : view === "saved"
-                            ? "Sauvegardez une publication depuis le flux pour la retrouver ici."
-                            : data.articles.length === 0
-                              ? "Actualisez les sources pour récupérer les publications disponibles."
-                              : "Explorez tout le flux ou ajustez les critères de votre profil."}
+                          : view === "evaluation"
+                            ? "Évaluez les publications du flux pour comparer vos retours aux règles de sélection."
+                            : view === "saved"
+                              ? "Sauvegardez une publication depuis le flux pour la retrouver ici."
+                              : data.articles.length === 0
+                                ? "Actualisez les sources pour récupérer les publications disponibles."
+                                : "Explorez tout le flux ou ajustez les critères de votre profil."}
                       </p>
                       {hasFilters ? (
                         <button
@@ -690,6 +838,7 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                           Réinitialiser les filtres
                         </button>
                       ) : view === "saved" ||
+                        view === "evaluation" ||
                         (view === "personal" && data.articles.length > 0) ? (
                         <button
                           className="button button-secondary"
@@ -1001,7 +1150,10 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                     id="profile-keywords"
                     rows={4}
                     value={keywords}
-                    onChange={(event) => setKeywords(event.target.value)}
+                    onChange={(event) => {
+                      invalidatePreview();
+                      setKeywords(event.target.value);
+                    }}
                     placeholder="Séparez vos mots-clés par des virgules"
                     aria-describedby="keywords-help"
                   />
@@ -1016,12 +1168,42 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                     id="profile-exclusions"
                     rows={3}
                     value={excludeKeywords}
-                    onChange={(event) => setExcludeKeywords(event.target.value)}
+                    onChange={(event) => {
+                      invalidatePreview();
+                      setExcludeKeywords(event.target.value);
+                    }}
                     placeholder="Termes à écarter, séparés par des virgules"
                   />
                   <p className="field-help">
-                    Un de ces mots-clés suffit à écarter une publication de Pour
-                    moi.
+                    Un de ces mots-clés suffit à écarter une publication, sauf
+                    si vous la signalez « Pertinent ».
+                  </p>
+                  <label htmlFor="profile-scope">
+                    Texte utilisé pour la sélection
+                  </label>
+                  <select
+                    id="profile-scope"
+                    value={matchScope}
+                    onChange={(event) => {
+                      invalidatePreview();
+                      setMatchScope(
+                        event.target.value as NonNullable<
+                          Profile["matchScope"]
+                        >,
+                      );
+                    }}
+                    aria-describedby="scope-help"
+                  >
+                    <option value="all_text">Tout le texte collecté</option>
+                    <option value="title_excerpt">
+                      Titre et extrait disponible
+                    </option>
+                  </select>
+                  <p id="scope-help" className="field-help">
+                    Le texte collecté peut contenir des mentions secondaires. Le
+                    mode titre et extrait se limite au titre et aux 480 premiers
+                    caractères disponibles ; sans extrait, seul le titre est
+                    utilisé. Ce choix s’applique aussi aux thèmes attribués.
                   </p>
                   <div className="threshold-row">
                     <div>
@@ -1041,13 +1223,32 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                         max={20}
                         step={1}
                         value={minScore}
-                        onChange={(event) => setMinScore(event.target.value)}
+                        onChange={(event) => {
+                          invalidatePreview();
+                          setMinScore(event.target.value);
+                        }}
                         required
                       />
                       <span>mot(s)-clé(s)</span>
                     </div>
                   </div>
-                  <div className="form-footer">
+                  <div className="form-footer profile-form-actions">
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      disabled={busy}
+                      onClick={(event) => {
+                        if (event.currentTarget.form?.reportValidity())
+                          void previewProfile();
+                      }}
+                    >
+                      {pending === "previewProfile" ? (
+                        <LoaderCircle className="spin" size={16} />
+                      ) : (
+                        <Eye size={16} />
+                      )}
+                      Prévisualiser les changements
+                    </button>
                     <button
                       type="submit"
                       className="button button-primary"
@@ -1062,6 +1263,12 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                     </button>
                   </div>
                 </form>
+                {preview && (
+                  <ProfilePreviewPanel
+                    preview={preview}
+                    currentEvaluation={data.evaluation}
+                  />
+                )}
               </section>
               <div className="profile-aside">
                 <section
@@ -1075,49 +1282,122 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                     <h2 id="evaluation-title">Évaluer la sélection</h2>
                   </div>
                   <p className="muted">
-                    Vos retours permettent de mesurer la pertinence des critères
-                    actuels.
+                    Comparez les règles enregistrées à vos retours, avant vos
+                    corrections manuelles. Ces mesures portent uniquement sur
+                    vos publications évaluées.
                   </p>
                   <dl className="evaluation-stats">
                     <div>
-                      <dt>Publications évaluées</dt>
+                      <dt>
+                        Publications évaluées
+                        <small>Pertinent ou Hors sujet</small>
+                      </dt>
                       <dd>{data.evaluation.reviewed}</dd>
                     </div>
                     <div>
                       <dt>
-                        Pertinentes, hors sélection
-                        <small>Signalées pertinentes, sous le seuil</small>
+                        <button
+                          type="button"
+                          className="evaluation-link"
+                          onClick={() => openEvaluation("missed")}
+                        >
+                          Pertinentes manquées par les règles{" "}
+                          <ArrowRight size={14} />
+                        </button>
+                        <small>
+                          {data.evaluation.matchedRelevant} retenues sur{" "}
+                          {data.evaluation.relevant} pertinentes
+                        </small>
                       </dt>
                       <dd>{data.evaluation.missedRelevant}</dd>
                     </div>
                     <div>
                       <dt>
-                        Hors sujet, au-dessus du seuil
-                        <small>À surveiller dans les critères</small>
+                        <button
+                          type="button"
+                          className="evaluation-link"
+                          onClick={() => openEvaluation("off_topic")}
+                        >
+                          Retenues mais hors sujet <ArrowRight size={14} />
+                        </button>
+                        <small>
+                          {data.evaluation.excludedOffTopic} écartées sur{" "}
+                          {data.evaluation.offTopic} hors sujet
+                        </small>
                       </dt>
                       <dd>{data.evaluation.selectedOffTopic}</dd>
                     </div>
+                    <div>
+                      <dt>
+                        Précision des règles
+                        <small>
+                          Part pertinente parmi les publications retenues et
+                          évaluées
+                        </small>
+                      </dt>
+                      <dd>{percentage(data.evaluation.precision)}</dd>
+                    </div>
+                    <div>
+                      <dt>
+                        Rappel des règles
+                        <small>
+                          Part des publications pertinentes retrouvées
+                        </small>
+                      </dt>
+                      <dd>{percentage(data.evaluation.recall)}</dd>
+                    </div>
                   </dl>
+                  {data.evaluation.reviewed === 0 && (
+                    <p className="evaluation-note">
+                      Signalez des publications « Pertinent » ou « Hors sujet »
+                      pour commencer la comparaison. Aucune qualité de sélection
+                      n’est encore mesurée.
+                    </p>
+                  )}
                   <p className="evaluation-note">
-                    Les retours servent à l’évaluation. Ils n’entraînent pas un
-                    modèle et ne modifient pas automatiquement vos mots-clés.
+                    {data.evaluation.seen} retour
+                    {data.evaluation.seen > 1 ? "s" : ""} « Déjà vu », exclu
+                    {data.evaluation.seen > 1 ? "s" : ""} de ces mesures. Un
+                    tiret indique qu’il n’y a pas assez de retours pour calculer
+                    le ratio.
                   </p>
+                  <button
+                    type="button"
+                    className="button button-secondary evaluation-start"
+                    onClick={() => openEvaluation("unreviewed")}
+                  >
+                    Évaluer des publications <ArrowRight size={15} />
+                  </button>
+                  <button
+                    type="button"
+                    className="evaluation-link evaluation-all"
+                    onClick={() => openEvaluation("reviewed")}
+                  >
+                    Voir tous mes retours <ArrowRight size={14} />
+                  </button>
                 </section>
                 <section className="profile-explainer">
                   <h3>Une sélection explicable</h3>
                   <p>
                     Le score compte les mots-clés de votre profil présents dans
-                    le texte disponible. Chaque publication précise l’origine
-                    analysée : texte du flux, extrait d’une page publique, ou
-                    titre et métadonnées uniquement. Le texte des flux est
-                    limité à 20 000 caractères. Les connecteurs de pages
-                    publiques consultent une seule page anglaise par source et
-                    par collecte, sans ouvrir le corps des articles.
+                    le texte choisi dans votre profil. Chaque publication
+                    précise l’origine du contenu disponible : texte du flux,
+                    extrait d’une page publique, ou titre uniquement. Le texte
+                    des flux est limité à 20 000 caractères. Les connecteurs de
+                    pages publiques consultent une seule page anglaise par
+                    source et par collecte, sans ouvrir le corps des articles.
                   </p>
                   <p>
-                    Les publications signalées « Hors sujet » ou « Déjà vu »
-                    quittent la vue Pour moi. Elles restent accessibles dans
-                    Tout le flux.
+                    « Pertinent » retient la publication dans Pour moi, même
+                    sous le seuil ou en présence d’une exclusion. « Hors sujet »
+                    et « Déjà vu » la retirent de cette vue. Cliquez à nouveau
+                    sur le retour actif pour réappliquer les règles. Les
+                    publications restent accessibles dans Tout le flux.
+                  </p>
+                  <p>
+                    Vos retours ne modifient pas automatiquement les mots-clés
+                    et n’entraînent aucun modèle. Prévisualisez vos ajustements,
+                    puis enregistrez-les pour les appliquer.
                   </p>
                 </section>
               </div>
@@ -1131,6 +1411,104 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
         </main>
       </div>
     </div>
+  );
+}
+
+function ProfilePreviewPanel({
+  preview,
+  currentEvaluation,
+}: {
+  preview: ProfilePreview;
+  currentEvaluation: Snapshot["evaluation"];
+}) {
+  return (
+    <section
+      className="profile-preview"
+      aria-labelledby="preview-title"
+      aria-live="polite"
+    >
+      <div className="panel-heading">
+        <Eye size={18} />
+        <h2 id="preview-title">Prévisualisation non enregistrée</h2>
+      </div>
+      <p className="muted">
+        Ces résultats utilisent les publications déjà collectées. Enregistrez
+        votre profil pour appliquer les changements.
+      </p>
+      <dl className="preview-counts">
+        <div>
+          <dt>Dans Pour moi, avec vos retours</dt>
+          <dd>
+            {preview.currentSelected} <ArrowRight size={15} aria-label="vers" />{" "}
+            {preview.selected}
+          </dd>
+        </div>
+        <div>
+          <dt>Pertinentes manquées par les règles</dt>
+          <dd>
+            {currentEvaluation.missedRelevant}{" "}
+            <ArrowRight size={15} aria-label="vers" />{" "}
+            {preview.evaluation.missedRelevant}
+          </dd>
+        </div>
+        <div>
+          <dt>Retenues mais hors sujet par les règles</dt>
+          <dd>
+            {currentEvaluation.selectedOffTopic}{" "}
+            <ArrowRight size={15} aria-label="vers" />{" "}
+            {preview.evaluation.selectedOffTopic}
+          </dd>
+        </div>
+      </dl>
+      <p className="evaluation-note">
+        Avant → après. La sélection porte sur toutes les publications ; les deux
+        écarts portent sur vos publications évaluées (
+        {preview.evaluation.reviewed}).
+        {preview.evaluation.reviewed === 0
+          ? " Sans retour de pertinence, ces nombres ne permettent pas de juger les nouveaux critères."
+          : " Les deux écarts comparent les règles à vos retours, avant correction manuelle."}
+      </p>
+      {[
+        {
+          label: "Publications qui entreraient dans Pour moi",
+          articles: preview.entered,
+          empty: "Aucune nouvelle publication retenue.",
+        },
+        {
+          label: "Publications qui quitteraient Pour moi",
+          articles: preview.exited,
+          empty: "Aucune publication retirée.",
+        },
+      ].map(({ label, articles, empty }) => (
+        <details className="preview-publications" key={label}>
+          <summary>
+            {label} <span className="count-badge">{articles.length}</span>
+          </summary>
+          {articles.length === 0 ? (
+            <p className="muted">{empty}</p>
+          ) : (
+            <ul>
+              {articles.map((article) => (
+                <li key={article.id}>
+                  <a href={article.url} target="_blank" rel="noreferrer">
+                    {article.title} <ArrowUpRight size={14} />
+                  </a>
+                  <span>
+                    {article.sourceName} · {article.score} correspondance
+                    {article.score > 1 ? "s" : ""}
+                  </span>
+                  <p>
+                    {article.reasons.length
+                      ? article.reasons.join(" · ")
+                      : "Aucun mot-clé du profil proposé trouvé."}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </details>
+      ))}
+    </section>
   );
 }
 
@@ -1223,12 +1601,14 @@ function SeparateAction({
 function StoryCard({
   articles,
   group,
+  matchScope,
   relatedByArticle,
   busy,
   onAction,
 }: {
   articles: Article[];
   group: StoryGroup;
+  matchScope?: Profile["matchScope"];
   relatedByArticle: Map<string, RelatedPublication[]>;
   busy: boolean;
   onAction: (action: MonitorAction) => void;
@@ -1260,6 +1640,7 @@ function StoryCard({
       </header>
       <ArticleCard
         article={lead}
+        matchScope={matchScope}
         grouped
         related={relatedByArticle.get(lead.id)}
         busy={busy}
@@ -1305,6 +1686,7 @@ function StoryCard({
               <summary>Détails et actions pour cette publication</summary>
               <ArticleCard
                 article={article}
+                matchScope={matchScope}
                 grouped
                 related={relatedByArticle.get(article.id)}
                 busy={busy}
@@ -1320,12 +1702,14 @@ function StoryCard({
 
 function ArticleCard({
   article,
+  matchScope,
   grouped = false,
   related = [],
   busy,
   onAction,
 }: {
   article: Article;
+  matchScope?: Profile["matchScope"];
   grouped?: boolean;
   related?: RelatedPublication[];
   busy: boolean;
@@ -1392,15 +1776,19 @@ function ArticleCard({
         <div className="analysis-details">
           <span>
             <span className="analysis-dot" />
-            {article.contentBasis === "feed_text"
-              ? "Texte du flux analysé"
-              : article.contentBasis === "page_excerpt"
-                ? "Extrait de la page analysé"
-                : "Titre et métadonnées analysés"}
+            {matchScope === "title_excerpt"
+              ? article.excerpt
+                ? "Titre et extrait utilisés pour la sélection"
+                : "Titre seul utilisé pour la sélection"
+              : article.contentBasis === "feed_text"
+                ? "Texte du flux analysé"
+                : article.contentBasis === "page_excerpt"
+                  ? "Extrait de la page analysé"
+                  : "Titre seul analysé"}
           </span>
           {article.reasons.length > 0 && (
             <details>
-              <summary>Pourquoi cette sélection ?</summary>
+              <summary>Pourquoi ce score ?</summary>
               <ul>
                 {article.reasons.map((reason, index) => (
                   <li key={`${reason}-${index}`}>{reason}</li>
@@ -1409,6 +1797,15 @@ function ArticleCard({
             </details>
           )}
         </div>
+        {article.feedback && (
+          <p className={`feedback-note feedback-note-${article.feedback}`}>
+            {article.feedback === "relevant"
+              ? "Retenu selon votre retour"
+              : article.feedback === "off_topic"
+                ? "Écarté de Pour moi : hors sujet"
+                : "Écarté de Pour moi : déjà vu"}
+          </p>
+        )}
         {article.keepSeparate && (
           <p className="separate-note">
             Conservée séparément selon votre choix.
@@ -1438,12 +1835,13 @@ function ArticleCard({
       </div>
       <div
         className="article-score"
-        aria-label={`${article.score} mots-clés correspondants`}
+        aria-label={`Score des règles : ${article.score} mots-clés correspondants`}
       >
         <span>CORRESPONDANCES</span>
         <strong>{article.score}</strong>
         <small>
-          mot{article.score > 1 ? "s" : ""}-clé{article.score > 1 ? "s" : ""}
+          mot{article.score > 1 ? "s" : ""}-clé{article.score > 1 ? "s" : ""}{" "}
+          selon les règles
         </small>
       </div>
       <div className="article-actions">
@@ -1493,6 +1891,13 @@ function ArticleCard({
               key={value}
               type="button"
               aria-pressed={article.feedback === value}
+              title={
+                article.feedback === value
+                  ? "Retirer ce retour et réappliquer les règles"
+                  : value === "relevant"
+                    ? "Retenir cette publication dans Pour moi"
+                    : "Retirer cette publication de Pour moi"
+              }
               className={`article-action feedback-action ${article.feedback === value ? "is-selected" : ""}`}
               disabled={busy}
               onClick={() =>

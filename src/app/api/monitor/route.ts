@@ -4,7 +4,8 @@ import { resolveCollection } from "@/lib/connectors";
 import { canonicalUrl, publicUrl } from "@/lib/feed";
 import { validateRemoteUrl } from "@/lib/network";
 import { getStore } from "@/lib/store";
-import type { Feedback, Profile } from "@/lib/types";
+import { parseProfile } from "@/lib/profile";
+import type { Feedback } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,12 +25,6 @@ function text(value: unknown, label: string, max = 200) {
   if (typeof value !== "string" || !value.trim() || value.length > max)
     throw new Error(`${label} invalide.`);
   return value.trim();
-}
-
-function terms(input: unknown) {
-  if (!Array.isArray(input) || input.length > 100)
-    throw new Error("Maximum 100 mots-clés.");
-  return [...new Set(input.map((term) => text(term, "Mot-clé", 100)))];
 }
 
 export async function POST(request: NextRequest) {
@@ -126,22 +121,13 @@ export async function POST(request: NextRequest) {
         );
         break;
       }
+      case "previewProfile": {
+        return json({
+          preview: store.previewProfile(parseProfile(body.profile)),
+        });
+      }
       case "updateProfile": {
-        const input = body.profile as Record<string, unknown> | undefined;
-        if (
-          !input ||
-          !Number.isInteger(input.minScore) ||
-          Number(input.minScore) < 1 ||
-          Number(input.minScore) > 20
-        )
-          throw new Error(
-            "Le seuil doit être compris entre 1 et 20 mots-clés.",
-          );
-        const profile: Profile = {
-          keywords: terms(input.keywords),
-          excludeKeywords: terms(input.excludeKeywords),
-          minScore: Number(input.minScore),
-        };
+        const profile = parseProfile(body.profile);
         store.setProfile(profile);
         message = "Profil enregistré et sélection recalculée.";
         break;

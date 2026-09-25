@@ -191,12 +191,19 @@ test("evaluation exposes false negatives and false positives before feedback fil
   );
   const snapshot = store.snapshot();
   assert.deepEqual(snapshot.evaluation, {
-    reviewed: 3,
+    reviewed: 2,
+    relevant: 1,
+    offTopic: 1,
+    seen: 1,
+    matchedRelevant: 0,
     missedRelevant: 1,
     selectedOffTopic: 1,
+    excludedOffTopic: 0,
+    precision: 0,
+    recall: 0,
   });
   assert.equal(snapshot.stats.total, 3);
-  assert.equal(snapshot.stats.selected, 0);
+  assert.equal(snapshot.stats.selected, 1);
 });
 
 test("metadata-only articles expose a missing excerpt rather than fabricated content", (t) => {

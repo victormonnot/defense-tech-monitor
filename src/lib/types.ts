@@ -45,6 +45,29 @@ export interface Profile {
   keywords: string[];
   excludeKeywords: string[];
   minScore: number;
+  matchScope?: "all_text" | "title_excerpt";
+}
+
+export interface Evaluation {
+  reviewed: number;
+  relevant: number;
+  offTopic: number;
+  seen: number;
+  matchedRelevant: number;
+  missedRelevant: number;
+  selectedOffTopic: number;
+  excludedOffTopic: number;
+  precision: number | null;
+  recall: number | null;
+}
+
+export interface ProfilePreview {
+  profile: Profile;
+  selected: number;
+  currentSelected: number;
+  evaluation: Evaluation;
+  entered: Article[];
+  exited: Article[];
 }
 
 export interface Snapshot {
@@ -53,11 +76,7 @@ export interface Snapshot {
   profile: Profile;
   stories: { groups: StoryGroup[]; related: StoryRelation[] };
   stats: { total: number; selected: number; unread: number; saved: number };
-  evaluation: {
-    reviewed: number;
-    missedRelevant: number;
-    selectedOffTopic: number;
-  };
+  evaluation: Evaluation;
   lastCollectionAt: string | null;
 }
 
@@ -75,4 +94,5 @@ export type MonitorAction =
   | { action: "setSaved"; id: string; value: boolean }
   | { action: "setSeparate"; id: string; value: boolean }
   | { action: "setFeedback"; id: string; value: Feedback | null }
+  | { action: "previewProfile"; profile: Profile }
   | { action: "updateProfile"; profile: Profile };

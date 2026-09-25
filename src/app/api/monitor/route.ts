@@ -9,6 +9,7 @@ import { parseActivityBatch } from "@/lib/activity";
 import { parseFolderName } from "@/lib/folders";
 import { parseCollectionSchedule } from "@/lib/collection-state";
 import { setJevMode, retryJevFailures } from "@/lib/jev-store";
+import { parseFeedInput } from "@/lib/custom-feeds";
 import type { Feedback } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -58,6 +59,46 @@ export async function POST(request: NextRequest) {
     const store = getStore();
     let message: string | undefined;
     switch (body.action) {
+      case "createCustomFeed": {
+        const feedId = store.saveCustomFeed(null, parseFeedInput(body.feed));
+        return json({
+          snapshot: store.snapshot(),
+          feedId,
+          message: "Fil personnalisé créé.",
+        });
+      }
+      case "updateCustomFeed": {
+        store.saveCustomFeed(
+          text(body.id, "Fil"),
+          parseFeedInput(body.feed),
+          body.revision as number,
+        );
+        message =
+          "Fil enregistré. Les résultats compatibles avec ses consignes sont conservés.";
+        break;
+      }
+      case "setCustomFeedArchived": {
+        if (typeof body.value !== "boolean")
+          throw new Error("État du fil invalide.");
+        store.setCustomFeedArchived(text(body.id, "Fil"), body.value);
+        message = body.value
+          ? "Fil archivé. Ses retours et résultats sont conservés."
+          : "Fil réactivé.";
+        break;
+      }
+      case "setFeedFeedback": {
+        if (
+          body.value !== null &&
+          !["relevant", "off_topic", "seen"].includes(String(body.value))
+        )
+          throw new Error("Retour invalide.");
+        store.setFeedFeedback(
+          text(body.id, "Publication"),
+          text(body.feedId, "Fil"),
+          body.value as Feedback | null,
+        );
+        break;
+      }
       case "setJevMode": {
         if (
           body.mode !== "off" &&
@@ -68,10 +109,10 @@ export async function POST(request: NextRequest) {
         setJevMode(store, body.mode);
         message =
           body.mode === "off"
-            ? "Analyse Jev en pause. Les règles déterminent la sélection."
+            ? "Analyse Jev en pause. Les règles déterminent Pour moi ; les fils personnalisés conservent leurs résultats Jev."
             : body.mode === "compare"
-              ? "Comparaison Jev activée. Les règles déterminent encore la sélection."
-              : "Sélection Jev activée. Les règles s’appliquent aux analyses absentes ou incertaines.";
+              ? "Comparaison Jev activée. Les règles déterminent Pour moi ; les fils personnalisés utilisent leurs résultats Jev."
+              : "Sélection Jev activée pour Pour moi. Les règles s’appliquent aux analyses absentes ou incertaines.";
         break;
       }
       case "retryJevFailures": {

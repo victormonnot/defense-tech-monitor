@@ -22,6 +22,8 @@ export interface JevAnalysis extends Omit<JevResult, "inputTokens"> {
   applied: boolean;
   scope: "all_text" | "title_excerpt";
   truncated: boolean;
+  minScore?: number;
+  minConfidence?: number;
 }
 
 export interface JevState {

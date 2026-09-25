@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MonitorStore } from "../src/lib/store";
 import { migrate } from "../src/lib/migrations";
+import { claimJev, setJevMode, settleJev } from "../src/lib/jev-store";
+import { JEV_MODEL } from "../src/lib/jev-client";
 
 function removeActivitySchema(db: DatabaseSync) {
   removeFolderSchema(db);
@@ -28,9 +30,14 @@ function removeCollectionSchema(db: DatabaseSync) {
 }
 
 function removeJevSchema(db: DatabaseSync) {
+  removeCustomFeedSchema(db);
   db.exec(
     "DROP TABLE jev_cache; DROP TABLE jev_attempts; DELETE FROM settings WHERE key IN ('jev_mode','jev_worker_error');",
   );
+}
+
+function removeCustomFeedSchema(db: DatabaseSync) {
+  db.exec("DROP TABLE feed_feedback; DROP TABLE custom_feeds;");
 }
 
 test("version 1 upgrades preserve publications, personal state, profile and source choices", (t) => {
@@ -89,7 +96,7 @@ test("version 1 upgrades preserve publications, personal state, profile and sour
   const upgraded = new MonitorStore(path);
   assert.equal(
     upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
-    7,
+    8,
   );
   assert.deepEqual(upgraded.snapshot().articles, before);
   assert.equal(upgraded.snapshot().activity.newCount, 0);
@@ -120,7 +127,7 @@ test("fresh migrations are idempotent and reject newer schemas without downgradi
   try {
     migrate(db);
     migrate(db);
-    assert.equal(db.prepare("PRAGMA user_version").get()?.user_version, 7);
+    assert.equal(db.prepare("PRAGMA user_version").get()?.user_version, 8);
     const startedAt = db
       .prepare("SELECT value FROM settings WHERE key='activity_started_at'")
       .get()?.value;
@@ -182,7 +189,7 @@ test("version 2 upgrades add reversible grouping preferences without changing ex
   try {
     assert.equal(
       upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
-      7,
+      8,
     );
     const after = upgraded.snapshot();
     assert.deepEqual(
@@ -251,7 +258,7 @@ test("version 3 upgrades baseline existing articles without changing personal or
     const after = upgraded.snapshot();
     assert.equal(
       upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
-      7,
+      8,
     );
     assert.deepEqual(
       { ...after, activity: undefined },
@@ -319,7 +326,7 @@ test("version 4 upgrades preserve publications, activity and preferences without
   try {
     assert.equal(
       upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
-      7,
+      8,
     );
     assert.deepEqual(upgraded.snapshot(), before);
     assert.deepEqual(upgraded.snapshot().folders, []);
@@ -369,7 +376,7 @@ test("version 5 upgrades add a paused schedule without changing articles, dossie
   try {
     assert.equal(
       upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
-      7,
+      8,
     );
     assert.deepEqual(upgraded.snapshot(), before);
     assert.deepEqual(upgraded.snapshot().collection, {
@@ -423,13 +430,91 @@ test("version 6 upgrades default Jev to off without changing existing data or st
   try {
     assert.equal(
       upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
-      7,
+      8,
     );
     assert.deepEqual(upgraded.snapshot(), before);
     assert.equal(upgraded.snapshot().jev?.mode, "off");
     assert.equal(upgraded.snapshot().jev?.pending, 1);
     assert.equal(
       upgraded.db.prepare("SELECT COUNT(*) AS count FROM jev_attempts").get()
+        ?.count,
+      0,
+    );
+    migrate(upgraded.db);
+    assert.deepEqual(upgraded.snapshot(), before);
+  } finally {
+    upgraded.db.close();
+  }
+});
+
+test("version 7 upgrades seed only the general feed and preserve cached judgments, ledger and user state", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "dtm-migration-v7-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const path = join(directory, "monitor.sqlite");
+  const old = new MonitorStore(path);
+  old.upsertEntries(
+    "brave1",
+    [
+      {
+        guid: "synthetic-v7",
+        url: "https://example.test/v7",
+        title: "Synthetic drone publication",
+        publishedAt: null,
+        text: "Synthetic excerpt",
+        excerpt: "Synthetic excerpt",
+        language: "en",
+        format: "article",
+        contentHash: "v7-hash",
+      },
+    ],
+    "2026-09-25T12:00:00Z",
+  );
+  const article = old.snapshot().articles[0];
+  old.setArticleState(article.id, "saved", true);
+  old.setArticleState(article.id, "feedback", "relevant");
+  old.acknowledgeChanges([article]);
+  const folder = old.createFolder("Synthetic dossier");
+  old.setArticleFolder(article.id, folder, true);
+  const config = {
+    apiKey: "synthetic-never-sent",
+    monthlyBudgetUsd: 5,
+    error: null,
+  };
+  setJevMode(old, "compare", config);
+  const claim = claimJev(old, config)!;
+  settleJev(old, claim, {
+    score: 2.4,
+    confidence: 0.9,
+    kind: "technical",
+    kindConfidence: 0.9,
+    model: JEV_MODEL,
+    inputTokens: 1000,
+  });
+  const before = old.snapshot();
+  const cache = old.db.prepare("SELECT * FROM jev_cache").all();
+  const ledger = old.db.prepare("SELECT * FROM jev_attempts").all();
+  removeCustomFeedSchema(old.db);
+  old.db.exec("PRAGMA user_version=7");
+  old.db.close();
+  const upgraded = new MonitorStore(path);
+  try {
+    assert.equal(
+      upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
+      8,
+    );
+    assert.deepEqual(
+      upgraded.db.prepare("SELECT * FROM jev_cache").all(),
+      cache,
+    );
+    assert.deepEqual(
+      upgraded.db.prepare("SELECT * FROM jev_attempts").all(),
+      ledger,
+    );
+    assert.deepEqual(upgraded.snapshot(), before);
+    assert.equal(upgraded.snapshot().customFeeds?.length, 1);
+    assert.equal(upgraded.snapshot().customFeeds?.[0].isGeneral, true);
+    assert.equal(
+      upgraded.db.prepare("SELECT COUNT(*) AS count FROM feed_feedback").get()
         ?.count,
       0,
     );

@@ -43,7 +43,14 @@ export function selectionSnapshotKey(
   snapshot: Pick<Snapshot, "articles" | "profile">,
 ) {
   return JSON.stringify([
-    snapshot.articles.map(({ jev: _jev, ...article }) => article),
+    snapshot.articles.map(
+      ({
+        jev: _jev,
+        feedAnalyses: _analyses,
+        feedFeedback: _feedback,
+        ...article
+      }) => article,
+    ),
     snapshot.profile,
   ]);
 }

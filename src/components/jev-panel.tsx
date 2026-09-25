@@ -11,6 +11,7 @@ import {
 import { jevDecision, matchesRules } from "@/lib/selection";
 import type { JevContentKind, JevMode, JevState } from "@/lib/jev-types";
 import type { Article, MonitorAction, Profile } from "@/lib/types";
+import type { CustomFeed } from "@/lib/custom-feeds";
 
 const modeLabels: Record<JevMode, string> = {
   off: "Désactivé",
@@ -49,12 +50,14 @@ export function JevPanel({
   profile,
   busy,
   onAction,
+  generalFeed,
 }: {
   state?: JevState;
   articles: Article[];
   profile: Profile;
   busy: boolean;
   onAction: (action: MonitorAction) => Promise<boolean>;
+  generalFeed?: CustomFeed;
 }) {
   const [draftMode, setDraftMode] = useState<JevMode | null>(null);
   const comparison = useMemo(() => {
@@ -96,8 +99,8 @@ export function JevPanel({
       </div>
       <p className="muted">
         Jev attribue un niveau d’intérêt de 0 à 3 à partir du contenu disponible
-        et de votre profil. Ce score ne vérifie pas les affirmations des
-        sources.
+        et des consignes de chaque fil. Ce score ne vérifie pas les affirmations
+        des sources.
       </p>
       <div className="jev-mode-status">
         <span
@@ -156,20 +159,21 @@ export function JevPanel({
         </div>
         <p id="jev-mode-help" className="jev-help">
           {selectedMode === "off"
-            ? "Les prochaines analyses sont arrêtées. Les résultats déjà obtenus restent consultables et les règles pilotent la sélection."
+            ? "Les prochaines analyses de tous les fils sont arrêtées. Les fils personnalisés conservent leurs résultats. Pour moi utilise les règles."
             : selectedMode === "compare"
-              ? "Les analyses alimentent la comparaison. Les règles continuent de piloter Pour moi."
-              : "Jev pilote la sélection quand sa confiance atteint 60 %. Sinon, les règles prennent le relais. Vos retours restent prioritaires."}
+              ? "Les fils personnalisés utilisent Jev. Dans Pour moi, les règles continuent de piloter la sélection générale pendant la comparaison."
+              : "Jev sélectionne selon les seuils de chaque fil. Dans Pour moi, les règles prennent le relais si l’analyse manque ou reste incertaine. Vos retours restent prioritaires."}
         </p>
         <p id="jev-transmission" className="jev-transmission">
           Activer Jev envoie à TypeSafe le texte collecté des publications et
-          les mots-clés de votre profil, dans la limite du budget local.
+          les consignes et exclusions de vos fils, dans la limite du budget
+          commun.
         </p>
       </form>
 
       <div className="jev-budget" aria-label="Budget mensuel Jev">
         <div className="jev-budget-heading">
-          <strong>Budget local · {state.month} UTC</strong>
+          <strong>Budget commun aux fils · {state.month} UTC</strong>
           <span>
             {state.monthlyBudgetUsd > 0
               ? `${dollars(state.monthlyBudgetUsd)} maximum`
@@ -223,8 +227,8 @@ export function JevPanel({
                 : state.lastError
                   ? "Analyses en pause après une erreur"
                   : "Analyses automatiques activées"}{" "}
-          · {state.ready} disponible{state.ready > 1 ? "s" : ""} ·{" "}
-          {state.pending} en attente
+          · tous les fils actifs · {state.ready} disponible
+          {state.ready > 1 ? "s" : ""} · {state.pending} en attente
           {state.failed > 0 && ` · ${state.failed} en échec`}
         </p>
         {state.budgetBlocked && (
@@ -265,9 +269,10 @@ export function JevPanel({
         <p className="jev-help">
           {comparison.cached} résultat{comparison.cached > 1 ? "s" : ""}{" "}
           disponible{comparison.cached > 1 ? "s" : ""} sur {articles.length}{" "}
-          publications. La comparaison retient les résultats avec au moins 60 %
-          de confiance, avant vos retours : intérêt Jev d’au moins 2/3, contre
-          le seuil de vos règles.
+          publications du fil général. La comparaison retient les résultats avec
+          au moins {confidence(generalFeed?.minConfidence ?? 0.6)}
+          de confiance, avant vos retours : intérêt Jev d’au moins{" "}
+          {generalFeed?.minScore ?? 2}/3, contre le seuil de vos règles.
         </p>
         {comparison.lowConfidence > 0 && (
           <p className="jev-help">
@@ -333,13 +338,21 @@ function ComparisonList({
   );
 }
 
-export function JevArticleIndicator({ article }: { article: Article }) {
+export function JevArticleIndicator({
+  article,
+  feedName,
+}: {
+  article: Article;
+  feedName?: string;
+}) {
   const analysis = article.jev;
   if (!analysis) return null;
   const usable = jevDecision(article) !== null;
   const applied = analysis.applied && usable && article.feedback === null;
   const label = !usable
-    ? "règles conservées"
+    ? feedName
+      ? "confiance insuffisante"
+      : "règles conservées"
     : analysis.applied && article.feedback !== null
       ? "votre retour prioritaire"
       : applied
@@ -353,8 +366,8 @@ export function JevArticleIndicator({ article }: { article: Article }) {
       </summary>
       <div className="jev-article-details">
         <p>
-          Intérêt estimé pour votre profil : {analysis.score}/3. Confiance du
-          modèle : {confidence(analysis.confidence)}.
+          Intérêt estimé pour {feedName ?? "Pour moi"} : {analysis.score}/3.
+          Confiance du modèle : {confidence(analysis.confidence)}.
         </p>
         {analysis.kindConfidence >= 0.6 && (
           <p>
@@ -364,9 +377,9 @@ export function JevArticleIndicator({ article }: { article: Article }) {
         )}
         <p>
           {!usable
-            ? "Confiance inférieure au seuil de 60 % : les règles et vos retours prennent le relais."
+            ? `Confiance inférieure au seuil de ${confidence(analysis.minConfidence ?? 0.6)} : ${feedName ? "ce résultat ne sélectionne pas automatiquement la publication dans ce fil." : "les règles et vos retours prennent le relais."}`
             : applied
-              ? "Cette analyse participe à la sélection Pour moi ; vos retours restent prioritaires."
+              ? `Cette analyse participe à la sélection ${feedName ?? "Pour moi"} ; vos retours restent prioritaires.`
               : "Ce résultat reste consultable sans piloter la sélection de cette publication."}
         </p>
         <p>

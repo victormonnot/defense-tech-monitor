@@ -8,7 +8,13 @@ import {
 } from "./jev-client";
 import type { JevAnalysis, JevMode, JevResult, JevState } from "./jev-types";
 import type { MonitorStore } from "./store";
-import type { ContentBasis, Profile } from "./types";
+import type { ContentBasis, Feedback, Profile } from "./types";
+import {
+  GENERAL_FEED_ID,
+  parseFeedInput,
+  type CustomFeed,
+  type FeedInput,
+} from "./custom-feeds";
 
 export const JEV_LEASE_MS = 120000;
 export const JEV_RESERVATION_NANOS =
@@ -35,8 +41,139 @@ export interface JevArticleInput {
 }
 export interface JevClaim {
   id: string;
+  feedId: string;
   cacheKey: string;
   request: Input["request"];
+}
+
+function storedFeeds(store: Store): CustomFeed[] {
+  return store.db
+    .prepare("SELECT * FROM custom_feeds ORDER BY is_general DESC,id")
+    .all()
+    .map((row) => ({
+      ...parseFeedInput(JSON.parse(String(row.input))),
+      id: String(row.id),
+      isGeneral: !!row.is_general,
+      archived: !!row.archived,
+      revision: Number(row.revision),
+      analysis: { ready: 0, pending: 0, failed: 0 },
+    }));
+}
+
+export function listCustomFeeds(store: Store): CustomFeed[] {
+  return jevSnapshot(store).feeds;
+}
+
+export function saveCustomFeed(
+  store: Store,
+  id: string | null,
+  value: FeedInput,
+  expectedRevision?: number,
+): string {
+  const input = parseFeedInput(value);
+  if (id !== null && (typeof id !== "string" || !id || id !== id.trim()))
+    throw new Error("Fil inconnu.");
+  if (
+    id !== null &&
+    (!Number.isSafeInteger(expectedRevision) || Number(expectedRevision) < 1)
+  )
+    throw new Error("Version du fil invalide.");
+  store.db.exec("BEGIN IMMEDIATE");
+  try {
+    if (id === null) {
+      const created = randomUUID();
+      store.db
+        .prepare("INSERT INTO custom_feeds (id,input) VALUES (?,?)")
+        .run(created, JSON.stringify(input));
+      store.db.exec("COMMIT");
+      return created;
+    }
+    const existing = store.db
+      .prepare("SELECT * FROM custom_feeds WHERE id=?")
+      .get(id);
+    if (!existing) throw new Error("Fil inconnu.");
+    if (Number(existing.revision) !== expectedRevision)
+      throw new Error(
+        "Ce fil a été modifié ailleurs. Actualisez-le avant d’enregistrer vos changements.",
+      );
+    const current = parseFeedInput(JSON.parse(String(existing.input)));
+    if (existing.is_general && input.name !== current.name)
+      throw new Error("Le fil général Pour moi ne peut pas être renommé.");
+    store.db
+      .prepare("UPDATE custom_feeds SET input=?,revision=revision+1 WHERE id=?")
+      .run(JSON.stringify(input), id);
+    store.db.exec("COMMIT");
+    return id;
+  } catch (error) {
+    store.db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+export function setCustomFeedArchived(
+  store: Store,
+  id: string,
+  value: boolean,
+): void {
+  if (typeof id !== "string" || !id || id !== id.trim())
+    throw new Error("Fil inconnu.");
+  if (typeof value !== "boolean") throw new Error("État du fil invalide.");
+  store.db.exec("BEGIN IMMEDIATE");
+  try {
+    const existing = store.db
+      .prepare("SELECT * FROM custom_feeds WHERE id=?")
+      .get(id);
+    if (!existing) throw new Error("Fil inconnu.");
+    if (existing.is_general)
+      throw new Error("Le fil général Pour moi ne peut pas être archivé.");
+    if (!!existing.archived !== value)
+      store.db
+        .prepare(
+          "UPDATE custom_feeds SET archived=?,revision=revision+1 WHERE id=?",
+        )
+        .run(Number(value), id);
+    store.db.exec("COMMIT");
+  } catch (error) {
+    store.db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+export function setFeedFeedback(
+  store: Store,
+  articleId: string,
+  feedId: string,
+  value: Feedback | null,
+): void {
+  if (typeof articleId !== "string" || typeof feedId !== "string")
+    throw new Error("Publication ou fil inconnu.");
+  if (value !== null && !["relevant", "off_topic", "seen"].includes(value))
+    throw new Error("Retour invalide.");
+  store.db.exec("BEGIN IMMEDIATE");
+  try {
+    if (!store.db.prepare("SELECT id FROM articles WHERE id=?").get(articleId))
+      throw new Error("Publication inconnue.");
+    if (!store.db.prepare("SELECT id FROM custom_feeds WHERE id=?").get(feedId))
+      throw new Error("Fil inconnu.");
+    if (feedId === GENERAL_FEED_ID)
+      store.db
+        .prepare("UPDATE articles SET feedback=? WHERE id=?")
+        .run(value, articleId);
+    else if (value === null)
+      store.db
+        .prepare("DELETE FROM feed_feedback WHERE article_id=? AND feed_id=?")
+        .run(articleId, feedId);
+    else
+      store.db
+        .prepare(
+          "INSERT INTO feed_feedback (article_id,feed_id,feedback) VALUES (?,?,?) ON CONFLICT(article_id,feed_id) DO UPDATE SET feedback=excluded.feedback",
+        )
+        .run(articleId, feedId, value);
+    store.db.exec("COMMIT");
+  } catch (error) {
+    store.db.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 function setting(store: Store, key: string) {
@@ -156,7 +293,13 @@ export function jevSnapshot(
   profile: Profile = store.profile(),
   config: Config = getJevConfig(),
   now = Date.now(),
-): { state: JevState; analyses: Map<string, JevAnalysis> } {
+): {
+  state: JevState;
+  analyses: Map<string, JevAnalysis>;
+  feeds: CustomFeed[];
+  feedAnalyses: Map<string, Record<string, JevAnalysis>>;
+  feedFeedback: Map<string, Record<string, Feedback>>;
+} {
   const currentMode = mode(store);
   const cache = new Map(
     (store.db.prepare("SELECT * FROM jev_cache").all() as CacheRow[]).map(
@@ -164,38 +307,63 @@ export function jevSnapshot(
     ),
   );
   const analyses = new Map<string, JevAnalysis>();
+  const feeds = storedFeeds(store);
+  const feedAnalyses = new Map<string, Record<string, JevAnalysis>>();
+  const feedFeedback = new Map<string, Record<string, Feedback>>();
+  for (const row of store.db.prepare("SELECT * FROM feed_feedback").all()) {
+    const id = String(row.article_id);
+    const feedback = feedFeedback.get(id) ?? {};
+    feedback[String(row.feed_id)] = row.feedback as Feedback;
+    feedFeedback.set(id, feedback);
+  }
   let ready = 0,
     failed = 0,
     pending = 0,
     needsRequest = 0;
-  let expired = false;
-  for (const article of inputs) {
-    const input = buildJevInput(article, profile);
-    const row = cache.get(input.cacheKey);
-    const result = row?.status === "success" ? cachedResult(row) : null;
-    if (result && row?.evaluated_at) {
-      ready++;
-      const { inputTokens: _tokens, ...analysis } = result;
-      analyses.set(article.id, {
-        ...analysis,
-        scope: input.request.state.article.scope as
-          | "all_text"
-          | "title_excerpt",
-        truncated: input.request.state.article.truncated,
-        evaluatedAt: row.evaluated_at,
-        applied: currentMode === "personal",
-      });
-    } else if (
-      row?.status === "failed" ||
-      (row?.status === "running" &&
-        Date.parse(row.lease_expires_at ?? "") <= now) ||
-      row?.status === "success"
-    ) {
-      failed++;
-      if (row.status === "running") expired = true;
-    } else {
-      pending++;
-      if (!row) needsRequest++;
+  const expired = [...cache.values()].some(
+    (row) =>
+      row.status === "running" && Date.parse(row.lease_expires_at ?? "") <= now,
+  );
+  for (const feed of feeds) {
+    const active = feed.enabled && !feed.archived;
+    for (const article of inputs) {
+      const input = buildJevInput(article, profile, feed);
+      const row = cache.get(input.cacheKey);
+      const result = row?.status === "success" ? cachedResult(row) : null;
+      if (result && row?.evaluated_at) {
+        feed.analysis.ready++;
+        if (active) ready++;
+        const { inputTokens: _tokens, ...analysis } = result;
+        const evaluated: JevAnalysis = {
+          ...analysis,
+          scope: input.request.state.article.scope as
+            | "all_text"
+            | "title_excerpt",
+          truncated: input.request.state.article.truncated,
+          evaluatedAt: row.evaluated_at,
+          applied: feed.isGeneral ? currentMode === "personal" : true,
+          minScore: feed.minScore,
+          minConfidence: feed.minConfidence,
+        };
+        if (feed.isGeneral) analyses.set(article.id, evaluated);
+        const results = feedAnalyses.get(article.id) ?? {};
+        results[feed.id] = evaluated;
+        feedAnalyses.set(article.id, results);
+      } else if (
+        row?.status === "failed" ||
+        (row?.status === "running" &&
+          Date.parse(row.lease_expires_at ?? "") <= now) ||
+        row?.status === "success"
+      ) {
+        feed.analysis.failed++;
+        if (active) failed++;
+      } else {
+        feed.analysis.pending++;
+        if (active) {
+          pending++;
+          if (!row) needsRequest++;
+        }
+      }
     }
   }
   const totals = budget(store, month(now));
@@ -209,6 +377,9 @@ export function jevSnapshot(
       : 0;
   return {
     analyses,
+    feeds,
+    feedAnalyses,
+    feedFeedback,
     state: {
       mode: currentMode,
       configured: configured(config),
@@ -308,31 +479,41 @@ export function claimJev(
       return null;
     }
     const profile = store.profile();
+    const feeds = storedFeeds(store).filter(
+      (feed) => feed.enabled && !feed.archived,
+    );
     const find = store.db.prepare(
       "SELECT cache_key FROM jev_cache WHERE cache_key=?",
     );
     for (const article of rawInputs(store)) {
-      const input = buildJevInput(article, profile);
-      if (find.get(input.cacheKey)) continue;
-      const id = randomUUID();
-      store.db
-        .prepare(
-          "INSERT INTO jev_attempts (id,cache_key,month,reserved_nanos,started_at,status) VALUES (?,?,?,?,?,'running')",
-        )
-        .run(
+      for (const feed of feeds) {
+        const input = buildJevInput(article, profile, feed);
+        if (find.get(input.cacheKey)) continue;
+        const id = randomUUID();
+        store.db
+          .prepare(
+            "INSERT INTO jev_attempts (id,cache_key,month,reserved_nanos,started_at,status) VALUES (?,?,?,?,?,'running')",
+          )
+          .run(
+            id,
+            input.cacheKey,
+            month(now),
+            JEV_RESERVATION_NANOS,
+            new Date(now).toISOString(),
+          );
+        store.db
+          .prepare(
+            "INSERT INTO jev_cache (cache_key,attempt_id,status,lease_expires_at) VALUES (?,?,'running',?)",
+          )
+          .run(input.cacheKey, id, new Date(now + JEV_LEASE_MS).toISOString());
+        store.db.exec("COMMIT");
+        return {
           id,
-          input.cacheKey,
-          month(now),
-          JEV_RESERVATION_NANOS,
-          new Date(now).toISOString(),
-        );
-      store.db
-        .prepare(
-          "INSERT INTO jev_cache (cache_key,attempt_id,status,lease_expires_at) VALUES (?,?,'running',?)",
-        )
-        .run(input.cacheKey, id, new Date(now + JEV_LEASE_MS).toISOString());
-      store.db.exec("COMMIT");
-      return { id, cacheKey: input.cacheKey, request: input.request };
+          feedId: feed.id,
+          cacheKey: input.cacheKey,
+          request: input.request,
+        };
+      }
     }
     store.db.exec("COMMIT");
     return null;

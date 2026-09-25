@@ -2,7 +2,7 @@
 
 A personal monitoring application for following developments in drones, robotics, and defense technology from sources you choose.
 
-Publications are collected through RSS/Atom or dedicated public-page connectors, stored locally, and selected using an editable keyword profile or optional Jev classification. Each publication retains its original title, source, language, and link. The interface distinguishes feed text, public-page excerpts, and titles with metadata only.
+Publications are collected through RSS/Atom or dedicated public-page connectors, stored locally, and selected using an editable keyword profile or Jev-powered feeds with individual written briefs. Each publication retains its original title, source, language, and link. The interface distinguishes feed text, public-page excerpts, and titles with metadata only.
 
 ## Getting started
 
@@ -34,6 +34,7 @@ The interface currently uses French labels:
 
 - **For me — Pour moi**: publications matching your profile, plus those explicitly marked relevant. Items marked off-topic or already seen are excluded.
 - **Review — Revue**: a compact, themed edition of publications first collected or updated within the last 24 hours or 7 days, with a Markdown download.
+- **My feeds — Mes fils**: create topic feeds from Drones, Ukraine news, and Startups presets or write your own brief. Each feed has independent relevance and confidence thresholds, sorting, and optional feedback.
 - **Full feed — Tout le flux**: all collected publications, with search and filters for source, topic, language, and format.
 - **Saved — Sauvegardés**: bookmarked publications, preserved across restarts.
 - **Folders — Dossiers**: organize publications into named folders and browse their contents with the usual feed filters.
@@ -75,7 +76,7 @@ Feedback corrects your feed immediately: **Relevant — Pertinent** retains a pu
 
 ### Optional Jev selection
 
-Jev can evaluate interest in a publication against your profile and classify its editorial type. It does not generate summaries or verify claims. The integration calls the official TypeSafe API with the pinned model `jev-1.13.0`. TypeSafe documents stronger accuracy in English than other languages; evaluate results on your own French and Ukrainian sources before relying on them. See the [model reference](https://docs.typesafe.ai/models) and [API documentation](https://docs.typesafe.ai/api).
+Jev can evaluate interest in a publication against each feed’s written brief and classify its editorial type. It does not generate summaries or verify claims. The integration calls the official TypeSafe API with the pinned model `jev-1.13.0`. TypeSafe documents stronger accuracy in English than other languages; evaluate results on your own French and Ukrainian sources before relying on them. See the [model reference](https://docs.typesafe.ai/models) and [API documentation](https://docs.typesafe.ai/api).
 
 Set these values in your local, Git-ignored `.env.local`, then restart the server:
 
@@ -86,15 +87,23 @@ DTM_JEV_MONTHLY_BUDGET_USD=1
 
 The budget above is an example; choose your own limit from 0 to 100 USD, with at most two decimal places. The default is 0, which blocks calls. The key stays on the server and is never returned to the browser. Under **Monitoring profile — Profil de veille**, explicitly apply one of these modes:
 
-- **Disabled — Désactivé**: keyword selection, no new Jev calls; cached results remain available for comparison.
-- **Compare with rules — Comparer aux règles**: analyze publications in the background while keyword rules continue to select the personal feed.
-- **Use in For me — Utiliser dans Pour moi**: apply cached Jev decisions when confidence is at least 0.6. A relevance score of at least 2 on the 0–3 rubric includes an article. Missing or uncertain classifications fall back to keywords. Personal feedback always takes precedence.
+- **Disabled — Désactivé**: no new Jev calls for any feed. For me uses keyword rules; custom feeds can still display their cached decisions.
+- **Compare with rules — Comparer aux règles**: analyze enabled feeds in the background. Custom feeds use their own scores while the general For me feed continues to use keyword rules.
+- **Use in For me — Utiliser dans Pour moi**: the general feed applies its own relevance and confidence thresholds. Missing or uncertain classifications fall back to keywords. Custom feeds only select usable results or explicit positive feedback, without borrowing the general keyword rules.
 
-The comparison shows agreement and differences on the subset with usable cached results, before personal feedback; it is not a measurement of accuracy. The existing evaluation metrics still measure keyword rules against your judgments. Profile previews retain personal feedback but exclude Jev, and never trigger API calls. In Jev personal mode, the normal personal feed orders explicitly relevant items first, then interest scores, with publication dates as a tie-breaker. Activity filters retain their collection-change ordering. Other views retain their existing ordering.
+Open **Consignes et réglages** on For me or a custom feed to edit what you want to see, what to avoid, the minimum interest score (0–3), the minimum confidence (0–100%), and relevance/date ordering. The starting thresholds of 1.5 and 60% are editable defaults, not calibrated accuracy guarantees. The score measures fit to the brief; a short announcement can score highly without engineering detail. Confidence describes uncertainty in the model’s classification, not source reliability.
 
-Activation sends the original title, language, available selected text, content provenance, interests and exclusions to TypeSafe. The profile's text scope applies to both engines. Metadata-only publications send no body. Requests are limited to 28 KB of serialized JSON; long content is shortened and labelled accordingly, while oversized profiles are rejected without sending them. Source content is treated as untrusted data. Classification indicators describe the available input, not an unseen full article or the truth of its claims.
+Create feeds under **Mes fils** using editable Drones, Ukraine news, and Startups presets, or a custom brief. One article can receive different scores in several feeds while retaining shared reading, bookmark, folder, and change-review state. Feedback within a custom feed applies only to that feed; general feedback remains attached to For me. Feedback never automatically trains the model. No labeling exercise is required. Archiving a custom feed preserves its settings, cached results and feedback and stops new analyses; restore it from Mes fils. The general feed cannot be archived or renamed.
 
-The local worker checks every 10 seconds while the server runs, processing up to five requests per batch. New or changed inputs are picked up without blocking collection or page loading. Opening the page, polling, previewing a profile, and building the application make no paid requests. Cache keys include the exact model, rubric, selected content and semantic profile. Read states, saves, feedback and the keyword-count threshold do not invalidate a classification. Pausing prevents subsequent calls; an in-flight call may finish. Cached decisions for outdated inputs are never applied to current publications.
+The settings preview filters existing scores locally, before manual feedback. Changing a threshold or sort order makes no provider request. Changing and saving instructions or exclusions invalidates that feed’s old scores and queues new analyses while it is enabled. A changed shared text scope or article content also requires fresh scores. The preview explicitly identifies scores from old instructions while a brief is being edited. Concurrent edits are rejected rather than silently overwriting a newer version. Pausing a feed stops subsequent requests but keeps its valid cached selection; an in-flight request may finish.
+
+All feeds share one monthly budget and usage ledger. New databases start with the general feed and Jev disabled; creating a custom feed does not bypass the global mode or missing configuration. Relevance sorting puts explicitly relevant articles first and then orders usable scores, using publication dates as a tie-breaker. Date sorting uses publication date, or collection date if missing. Activity filters retain collection-change ordering.
+
+The optional comparison in Profil de veille compares the general feed with keyword rules before feedback; it is not a measurement of accuracy. The existing evaluation metrics measure keyword rules against judgments. Keyword profile previews retain general feedback but exclude Jev and never trigger API calls. Keyword changes affect the fallback rules and topic tags, not the written feed briefs.
+
+Activation sends the original title, language, available selected text, content provenance, and the feed’s instructions and exclusions to TypeSafe. The profile’s text scope applies to every feed. Metadata-only publications send no body. Requests are limited to 28 KB of serialized JSON; long content is shortened and labelled accordingly, while oversized inputs are rejected without sending them. Source content is treated as untrusted data. Classification indicators describe the available input, not an unseen full article or the truth of its claims.
+
+The local worker checks every 10 seconds while the server runs, processing up to five requests per batch across enabled, unarchived feeds. Opening the page, polling, drafting settings, previewing a profile, and building the application make no paid requests. Cache keys include the exact model, rubric, selected content, and semantic brief. Names, thresholds, sort order, read states, saves and feedback do not invalidate a classification; identical inputs can share cached results. Cached decisions for outdated inputs are never applied to current publications.
 
 Usage is tracked per UTC calendar month in this database, separately from your TypeSafe account balance. At the documented input price of $0.042 per million tokens, each request first reserves its maximum 64,000-token charge ($0.002688) in a SQLite transaction. A valid response settles the estimate using reported input usage. Timeouts, interrupted requests and unvalidated responses keep the conservative reservation because billing is unknown. Known failures before HTTP release it. Insufficient remaining budget blocks further requests; changing modes or retrying does not erase charges or reservations. This is a local spending guard at the documented rate, not a provider billing statement or an account-wide limit; other databases and applications have separate budgets.
 
@@ -166,7 +175,7 @@ Collection respects `robots.txt`, limits response size, applies timeouts, and va
 - This version does not include exhaustive archive imports, generated summaries, alerts, or audio.
 - The database and `.env` files are excluded from Git. The example configuration contains no secrets. To back up local data, stop the application and copy the `data/` directory.
 
-Existing databases are upgraded automatically to schema version 7 when opened. Migrations add content provenance, a per-publication grouping preference, revision-based change tracking, folder storage, collection scheduling, and optional Jev cache/accounting while preserving collected publications, read and saved states, feedback, source activation settings, and the keyword profile. Groups are derived from the current publications; they do not merge or delete database records.
+Existing databases are upgraded automatically to schema version 8 when opened. Migrations add content provenance, a per-publication grouping preference, revision-based change tracking, folder storage, collection scheduling, optional Jev cache/accounting, and editable feeds with independent feedback while preserving collected publications, read and saved states, feedback, source activation settings, and the keyword profile. Groups are derived from the current publications; they do not merge or delete database records.
 
 ## Architecture
 
@@ -183,6 +192,7 @@ src/instrumentation.ts            Server-start worker registration
 src/lib/store.ts                  SQLite persistence and personal state
 src/lib/migrations.ts             Versioned database upgrades
 src/lib/classifier.ts             Replaceable classification and explicit rules
+src/lib/custom-feeds.ts           Feed contracts, input validation, and editable presets
 src/lib/jev-client.ts             Pinned TypeSafe requests, bounded inputs, validated responses
 src/lib/jev-store.ts              Cached decisions, transactional reservations, usage ledger
 src/lib/jev-worker.ts             Optional background classification and explicit recovery

@@ -1,4 +1,5 @@
 import type { Article, Evaluation, Profile } from "./types";
+import type { CustomFeed } from "./custom-feeds";
 
 type SelectionArticle = Pick<Article, "score" | "feedback" | "jev">;
 
@@ -14,11 +15,44 @@ export function jevDecision(article: Pick<Article, "jev">): boolean | null {
     result.score < 0 ||
     result.score > 3 ||
     !Number.isFinite(result.confidence) ||
-    result.confidence < JEV_MIN_CONFIDENCE ||
+    result.confidence < (result.minConfidence ?? JEV_MIN_CONFIDENCE) ||
     result.confidence > 1
   )
     return null;
-  return result.score >= JEV_MIN_RELEVANCE;
+  return result.score >= (result.minScore ?? JEV_MIN_RELEVANCE);
+}
+
+/** Display a feed's score and feedback without changing shared article state. */
+export function articleForFeed(article: Article, feed: CustomFeed): Article {
+  if (feed.isGeneral) return article;
+  const analysis = article.feedAnalyses?.[feed.id];
+  return {
+    ...article,
+    feedback: article.feedFeedback?.[feed.id] ?? null,
+    jev: analysis
+      ? {
+          ...analysis,
+          applied: true,
+          minScore: feed.minScore,
+          minConfidence: feed.minConfidence,
+        }
+      : undefined,
+  };
+}
+
+export function matchesCustomFeed(article: Article, feed: CustomFeed): boolean {
+  const scoped = articleForFeed(article, feed);
+  if (scoped.feedback === "relevant") return true;
+  if (scoped.feedback !== null) return false;
+  return jevDecision(scoped) === true;
+}
+
+export function compareFeedDate(a: Article, b: Article): number {
+  const date = (article: Article) => {
+    const value = Date.parse(article.publishedAt ?? article.collectedAt);
+    return Number.isFinite(value) ? value : 0;
+  };
+  return date(b) - date(a) || a.id.localeCompare(b.id);
 }
 
 /** Explicit feedback leads; unclassified/uncertain items retain chronological order. */
@@ -28,7 +62,7 @@ export function comparePersonalPriority(a: Article, b: Article): number {
       ? 4
       : article.jev?.applied && jevDecision(article) !== null
         ? article.jev.score
-        : JEV_MIN_RELEVANCE;
+        : -1;
   const date = (article: Article) => {
     const value = Date.parse(article.publishedAt ?? article.collectedAt);
     return Number.isFinite(value) ? value : 0;

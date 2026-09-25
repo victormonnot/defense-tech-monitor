@@ -15,6 +15,7 @@ import {
   evaluateSelection,
 } from "../src/lib/selection";
 import type { Article, Profile } from "../src/lib/types";
+import { GENERAL_FEED, type CustomFeed } from "../src/lib/custom-feeds";
 
 const profile: Profile = {
   keywords: ["robot", "navigation"],
@@ -130,6 +131,116 @@ test("cache keys follow request content, profile semantics, language, scope and 
     buildJevInput(article, { ...profile, matchScope: "title_excerpt" }),
   ])
     assert.notEqual(other.cacheKey, key);
+});
+
+test("a custom feed uses its own brief and exclusions without leaking unrelated global interests", () => {
+  const feed = {
+    ...GENERAL_FEED,
+    instructions: "Suivre les levées de fonds des startups de robotique.",
+    exclusions: "Annonces sans lien avec la robotique.",
+  };
+  const unrelatedProfile = {
+    ...profile,
+    keywords: ["GLOBAL PRIVATE INTEREST"],
+    excludeKeywords: ["GLOBAL PRIVATE EXCLUSION"],
+    matchScope: "title_excerpt" as const,
+  };
+  const { request } = buildJevInput(article, unrelatedProfile, feed);
+  assert.deepEqual(request.state.reader, {
+    interests: [feed.instructions],
+    exclusions: [feed.exclusions],
+  });
+  assert.equal(request.state.article.scope, "title_excerpt");
+  assert.equal(request.state.article.content, article.excerpt);
+  assert.ok(!JSON.stringify(request).includes("GLOBAL PRIVATE"));
+  assert.deepEqual(
+    buildJevInput(article, profile, { ...feed, exclusions: "" }).request.state
+      .reader.exclusions,
+    [],
+  );
+  assert.deepEqual(
+    request.questions,
+    buildJevInput(article, profile).request.questions,
+  );
+});
+
+test("custom feed scores can be filtered and renamed without invalidating analysis, while edited briefs invalidate it", () => {
+  const feed: CustomFeed = {
+    ...GENERAL_FEED,
+    id: "feed-1",
+    isGeneral: false,
+    archived: false,
+    revision: 1,
+    analysis: { ready: 0, pending: 1, failed: 0 },
+  };
+  const key = buildJevInput(article, profile, feed).cacheKey;
+  const settingsOnly: CustomFeed = {
+    ...feed,
+    id: "feed-2",
+    name: "A renamed feed",
+    minScore: 0.5,
+    minConfidence: 0.9,
+    sort: "date",
+    enabled: false,
+    archived: true,
+    revision: 2,
+    analysis: { ready: 1, pending: 0, failed: 0 },
+  };
+  assert.equal(buildJevInput(article, profile, settingsOnly).cacheKey, key);
+  assert.equal(
+    buildJevInput(
+      article,
+      {
+        ...profile,
+        keywords: ["new unrelated keywords"],
+        excludeKeywords: [],
+        minScore: 20,
+      },
+      feed,
+    ).cacheKey,
+    key,
+  );
+  for (const changed of [
+    buildJevInput(article, profile, {
+      ...feed,
+      instructions: "Suivre les startups.",
+    }),
+    buildJevInput(article, profile, {
+      ...feed,
+      exclusions: "Aucune annonce financière.",
+    }),
+    buildJevInput(article, { ...profile, matchScope: "title_excerpt" }, feed),
+    buildJevInput({ ...article, title: "A revised title" }, profile, feed),
+    buildJevInput({ ...article, text: "A revised body" }, profile, feed),
+  ])
+    assert.notEqual(changed.cacheKey, key);
+});
+
+test("briefs stay intact when article content is truncated, and metadata-only articles still send no body", () => {
+  const feed = {
+    ...GENERAL_FEED,
+    instructions: "робот ".repeat(600),
+    exclusions: "排除".repeat(900),
+  };
+  const { request } = buildJevInput(
+    { ...article, text: "🤖дрони".repeat(20000) },
+    profile,
+    feed,
+  );
+  assert.equal(request.state.article.truncated, true);
+  assert.ok(Buffer.byteLength(JSON.stringify(request)) <= 28000);
+  assert.deepEqual(request.state.reader, {
+    interests: [feed.instructions],
+    exclusions: [feed.exclusions],
+  });
+  assert.ok(!/[\uD800-\uDBFF]$/.test(request.state.article.content));
+  const metadata = buildJevInput(
+    { ...article, contentBasis: "metadata" },
+    profile,
+    feed,
+  );
+  assert.equal(metadata.request.state.article.content, "");
+  assert.equal(metadata.request.state.article.basis, "metadata");
 });
 
 test("oversized multilingual content is bounded with truthful truncation, without cutting a surrogate pair", () => {

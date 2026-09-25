@@ -21,6 +21,7 @@ import {
 import { processJevBatch } from "../src/lib/jev-worker";
 import type { JevResult } from "../src/lib/jev-types";
 import { MonitorStore } from "../src/lib/store";
+import { GENERAL_FEED_ID, type FeedInput } from "../src/lib/custom-feeds";
 
 const config = {
   apiKey: "synthetic-key-never-sent",
@@ -76,6 +77,13 @@ function gate() {
     release = resolve;
   });
   return { wait, release };
+}
+
+function editGeneral(store: MonitorStore, changes: Partial<FeedInput>) {
+  const feed = store
+    .listCustomFeeds()
+    .find((item) => item.id === GENERAL_FEED_ID)!;
+  store.saveCustomFeed(feed.id, { ...feed, ...changes }, feed.revision);
 }
 
 test("Jev starts off, never calls the service on snapshots and requires valid configuration to enable", async (t) => {
@@ -184,10 +192,10 @@ test("profile previews are rules-only on both sides and never mutate or spend", 
   assert.equal(state(store).ready, 1);
 });
 
-test("cache matching follows current content and profile while personal actions preserve it", async (t) => {
+test("cache matching follows current content and feed instructions while personal actions preserve it", async (t) => {
   const store = storeFor(t);
   addArticles(store);
-  const profile = store.profile();
+  const initialFeed = store.listCustomFeeds()[0];
   setJevMode(store, "personal", config);
   await processJevBatch(store, {
     config: () => config,
@@ -200,10 +208,12 @@ test("cache matching follows current content and profile while personal actions 
   store.setArticleState(article.id, "feedback", "relevant");
   store.acknowledgeChanges([article]);
   assert.equal(state(store).ready, 1);
-  store.setProfile({ ...profile, keywords: ["different reader interest"] });
+  store.setProfile({ ...store.profile(), keywords: ["different legacy rule"] });
+  assert.equal(state(store).ready, 1);
+  editGeneral(store, { instructions: "Different reader interest" });
   assert.equal(store.snapshot().articles[0].jev, undefined);
   assert.equal(state(store).pending, 1);
-  store.setProfile(profile);
+  editGeneral(store, initialFeed);
   assert.equal(state(store).ready, 1);
   store.db
     .prepare("UPDATE articles SET text='Changed available text' WHERE id=?")
@@ -397,7 +407,7 @@ test("stale input results stay cached without applying and stale-input failures 
           return result;
         },
       });
-      store.setProfile({ ...store.profile(), keywords: ["new interests"] });
+      editGeneral(store, { instructions: "New interests" });
       setJevMode(store, "off", config);
       pending.release();
       await batch;
@@ -414,7 +424,7 @@ test("stale input results stay cached without applying and stale-input failures 
     });
 });
 
-test("each worker tick processes at most five requests and rereads profile before each claim", async (t) => {
+test("each worker tick processes at most five requests and rereads feed instructions before each claim", async (t) => {
   const store = storeFor(t);
   addArticles(store, 7);
   setJevMode(store, "compare", config);
@@ -427,8 +437,7 @@ test("each worker tick processes at most five requests and rereads profile befor
       call: async (request) => {
         calls++;
         profiles.push(request.state.reader.interests);
-        if (calls === 1)
-          store.setProfile({ ...store.profile(), keywords: ["changed"] });
+        if (calls === 1) editGeneral(store, { instructions: "changed" });
         return result;
       },
     }),

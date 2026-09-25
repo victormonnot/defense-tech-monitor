@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
+import { GENERAL_FEED, GENERAL_FEED_ID } from "./custom-feeds";
 
-const CURRENT_VERSION = 7;
+const CURRENT_VERSION = 8;
 
 export function migrate(db: DatabaseSync) {
   db.exec("BEGIN IMMEDIATE");
@@ -120,6 +121,28 @@ export function migrate(db: DatabaseSync) {
         );
         PRAGMA user_version = 7;
       `);
+    }
+    if (version < 8) {
+      db.exec(`
+        CREATE TABLE custom_feeds (
+          id TEXT PRIMARY KEY, input TEXT NOT NULL,
+          is_general INTEGER NOT NULL DEFAULT 0 CHECK(is_general IN (0,1)),
+          archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN (0,1)),
+          revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+          CHECK(is_general=0 OR archived=0)
+        );
+        CREATE UNIQUE INDEX custom_feeds_general ON custom_feeds(is_general) WHERE is_general=1;
+        CREATE TABLE feed_feedback (
+          article_id TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+          feed_id TEXT NOT NULL REFERENCES custom_feeds(id) ON DELETE CASCADE,
+          feedback TEXT NOT NULL CHECK(feedback IN ('relevant','off_topic','seen')),
+          PRIMARY KEY(article_id,feed_id)
+        );
+        PRAGMA user_version = 8;
+      `);
+      db.prepare(
+        "INSERT INTO custom_feeds (id,input,is_general) VALUES (?,?,1)",
+      ).run(GENERAL_FEED_ID, JSON.stringify(GENERAL_FEED));
     }
     db.exec("COMMIT");
   } catch (error) {

@@ -54,6 +54,9 @@ import {
   matchesProfile,
   matchesEvaluation,
   comparePersonalPriority,
+  compareFeedDate,
+  articleForFeed,
+  matchesCustomFeed,
   jevDecision,
   type EvaluationFilter,
 } from "@/lib/selection";
@@ -62,9 +65,13 @@ import { CollectionSchedule } from "@/components/collection-schedule";
 import { useMonitorSnapshot } from "@/components/use-monitor-snapshot";
 import { DigestView } from "@/components/digest-view";
 import { JevArticleIndicator, JevPanel } from "@/components/jev-panel";
+import { FeedManager, FeedSettings } from "@/components/feed-settings";
+import { GENERAL_FEED_ID } from "@/lib/custom-feeds";
 
 type View =
   | "personal"
+  | "feeds"
+  | "feed"
   | "all"
   | "digest"
   | "saved"
@@ -77,6 +84,7 @@ type RelatedPublication = { article: Article; reason: string };
 
 const views = [
   { id: "personal", label: "Pour moi", icon: Compass },
+  { id: "feeds", label: "Mes fils", icon: ListFilter },
   { id: "all", label: "Tout le flux", icon: Radio },
   { id: "digest", label: "Revue", icon: Newspaper },
   { id: "saved", label: "Sauvegardés", icon: Bookmark },
@@ -94,7 +102,19 @@ const viewCopy: Record<
     eyebrow: "VOTRE VEILLE",
     title: "Pour moi",
     description:
-      "Les publications qui correspondent à votre profil, réunies au même endroit.",
+      "Votre fil général de veille, sélectionné selon vos consignes et vos intérêts.",
+  },
+  feeds: {
+    eyebrow: "VOS CENTRES D’INTÉRÊT",
+    title: "Mes fils",
+    description:
+      "Créez des fils avec leurs propres consignes, seuils et ordre de lecture.",
+  },
+  feed: {
+    eyebrow: "VOTRE FIL PERSONNALISÉ",
+    title: "Fil personnalisé",
+    description:
+      "Une sélection Jev dédiée à ce sujet, à partir de vos sources.",
   },
   all: {
     eyebrow: "EXPLORER",
@@ -209,6 +229,8 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
   const { data, acceptSnapshot, beginChange, endChange, refresh, syncError } =
     useMonitorSnapshot(initialData, invalidatePreview);
   const [view, setView] = useState<View>("personal");
+  const [selectedFeedId, setSelectedFeedId] = useState<string | null>(null);
+  const [showFeedExcluded, setShowFeedExcluded] = useState(false);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(
     initialData.folders.find((folder) => !folder.archived)?.id ??
       initialData.folders[0]?.id ??
@@ -245,6 +267,28 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
   const selected = data.articles.filter((article) =>
     matchesProfile(article, data.profile),
   );
+  const customFeeds = data.customFeeds ?? [];
+  const generalFeed = customFeeds.find((feed) => feed.id === GENERAL_FEED_ID);
+  const selectedFeed = customFeeds.find((feed) => feed.id === selectedFeedId);
+  const contextFeed =
+    view === "personal"
+      ? generalFeed
+      : view === "feed"
+        ? selectedFeed
+        : undefined;
+  const contextArticles = useMemo(
+    () =>
+      view === "feed" && selectedFeed
+        ? data.articles.map((article) => articleForFeed(article, selectedFeed))
+        : data.articles,
+    [data.articles, view, selectedFeed],
+  );
+  const statSelection =
+    view === "feed" && selectedFeed
+      ? data.articles.filter((article) =>
+          matchesCustomFeed(article, selectedFeed),
+        )
+      : selected;
   const saved = data.articles.filter((article) => article.saved);
   const jevAppliedCount = data.articles.filter(
     (article) => article.jev?.applied && jevDecision(article) !== null,
@@ -272,8 +316,14 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
 
   const filteredArticles = useMemo(() => {
     const query = search.trim().toLocaleLowerCase("fr");
-    return data.articles.filter((article) => {
+    return contextArticles.filter((article) => {
       if (view === "personal" && !matchesProfile(article, data.profile))
+        return false;
+      if (
+        view === "feed" &&
+        (!selectedFeed ||
+          (!showFeedExcluded && !matchesCustomFeed(article, selectedFeed)))
+      )
         return false;
       if (view === "saved" && !article.saved) return false;
       if (
@@ -311,21 +361,34 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
     formatFilter,
     evaluationFilter,
     selectedFolder,
+    selectedFeed,
+    contextArticles,
+    showFeedExcluded,
   ]);
 
   const articles = useMemo(() => {
     if (
-      view === "personal" &&
+      (view === "personal" || view === "feed") &&
       activityFilter === "all" &&
-      data.jev?.mode === "personal"
+      (view === "feed" || data.jev?.mode === "personal")
     )
-      return [...filteredArticles].sort(comparePersonalPriority);
+      return [...filteredArticles].sort(
+        contextFeed?.sort === "date"
+          ? compareFeedDate
+          : comparePersonalPriority,
+      );
     if (view === "evaluation" || activityFilter === "all")
       return filteredArticles;
     return filteredArticles
       .filter((article) => matchesActivity(article, activityFilter))
       .sort(activityOrder);
-  }, [filteredArticles, view, activityFilter, data.jev?.mode]);
+  }, [
+    filteredArticles,
+    view,
+    activityFilter,
+    data.jev?.mode,
+    contextFeed?.sort,
+  ]);
   const activityCounts = {
     all: filteredArticles.length,
     new: filteredArticles.filter((article) => article.changeKind === "new")
@@ -385,6 +448,7 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
       const result = (await response.json()) as {
         snapshot?: Snapshot;
         folderId?: string;
+        feedId?: string;
         message?: string;
         error?: string;
       };
@@ -393,6 +457,12 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
           result.error || "L’action n’a pas pu être effectuée. Réessayez.",
         );
       acceptSnapshot(result.snapshot);
+      if (action.action === "createCustomFeed" && result.feedId) {
+        setSelectedFeedId(result.feedId);
+        setShowFeedExcluded(false);
+        setView("feed");
+        resetFilters();
+      }
       if (action.action === "createFolder") {
         if (result.folderId) {
           setSelectedFolderId(result.folderId);
@@ -504,6 +574,15 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
     changeView("folders");
   }
 
+  function openFeed(id: string) {
+    setShowFeedExcluded(false);
+    if (id === GENERAL_FEED_ID) changeView("personal");
+    else {
+      setSelectedFeedId(id);
+      changeView("feed");
+    }
+  }
+
   function resetSourceForm() {
     setEditingSourceId(null);
     setSourceName("");
@@ -553,7 +632,10 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
     );
   }
 
-  const copy = viewCopy[view];
+  const copy =
+    view === "feed" && selectedFeed
+      ? { ...viewCopy.feed, title: selectedFeed.name }
+      : viewCopy[view];
   const busy = pending !== null;
 
   return (
@@ -602,6 +684,36 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                 )}
             </button>
           ))}
+          {customFeeds.some((feed) => !feed.isGeneral && !feed.archived) && (
+            <div className="custom-feed-nav" aria-label="Fils personnalisés">
+              <p className="workspace-label">Fils personnalisés</p>
+              {customFeeds
+                .filter((feed) => !feed.isGeneral && !feed.archived)
+                .map((feed) => (
+                  <button
+                    key={feed.id}
+                    type="button"
+                    className={`nav-item ${view === "feed" && selectedFeedId === feed.id ? "active" : ""}`}
+                    aria-current={
+                      view === "feed" && selectedFeedId === feed.id
+                        ? "page"
+                        : undefined
+                    }
+                    onClick={() => openFeed(feed.id)}
+                  >
+                    <Radio size={17} />
+                    <span>{feed.name}</span>
+                    <span className="nav-count">
+                      {
+                        data.articles.filter((article) =>
+                          matchesCustomFeed(article, feed),
+                        ).length
+                      }
+                    </span>
+                  </button>
+                ))}
+            </div>
+          )}
         </nav>
         <div className="sidebar-bottom">
           <div className="sidebar-note">
@@ -619,7 +731,11 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
           <div className="breadcrumb">
             <span>Monitor</span>
             <ChevronRight size={14} />
-            <strong>{views.find((item) => item.id === view)?.label}</strong>
+            <strong>
+              {view === "feed"
+                ? (selectedFeed?.name ?? "Fil personnalisé")
+                : views.find((item) => item.id === view)?.label}
+            </strong>
             {view === "folders" && selectedFolder && (
               <>
                 <ChevronRight size={14} />
@@ -707,14 +823,20 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                 icon={<Radio size={18} />}
               />
               <Stat
-                label="Dans votre sélection"
-                value={selected.length}
+                label={view === "feed" ? "Dans ce fil" : "Dans Pour moi"}
+                value={statSelection.length}
                 icon={<Compass size={18} />}
                 highlight
               />
               <Stat
-                label="À lire dans la sélection"
-                value={selected.filter((article) => !article.isRead).length}
+                label={
+                  view === "feed"
+                    ? "À lire dans ce fil"
+                    : "À lire dans Pour moi"
+                }
+                value={
+                  statSelection.filter((article) => !article.isRead).length
+                }
                 icon={<Eye size={18} />}
               />
               <Stat
@@ -732,6 +854,60 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
             />
           )}
 
+          {view === "feeds" && (
+            <FeedManager
+              feeds={customFeeds}
+              busy={busy}
+              onAction={(action) => mutate(action)}
+              onSelect={openFeed}
+            />
+          )}
+
+          {(view === "personal" || view === "feed") && contextFeed && (
+            <details className="feed-settings-disclosure" key={contextFeed.id}>
+              <summary>
+                <Settings2 size={16} /> Consignes et réglages de{" "}
+                {contextFeed.name}
+              </summary>
+              <FeedSettings
+                feed={contextFeed}
+                articles={data.articles}
+                busy={busy}
+                onAction={(action) => mutate(action)}
+              />
+            </details>
+          )}
+
+          {view === "feed" && selectedFeed && (
+            <div className="selection-note">
+              <ListFilter size={18} />
+              <span>
+                {selectedFeed.analysis.ready} analyse(s) disponible(s) ·{" "}
+                {selectedFeed.analysis.pending} en attente ·{" "}
+                {selectedFeed.analysis.failed} en échec.
+                {selectedFeed.archived
+                  ? " Fil archivé : analyses en pause."
+                  : !selectedFeed.enabled
+                    ? " Analyses de ce fil en pause."
+                    : data.jev?.mode === "off"
+                      ? " Jev est désactivé dans le profil de veille."
+                      : ""}{" "}
+                Les résultats absents ou sous le seuil de confiance ne sont pas
+                sélectionnés automatiquement.
+              </span>
+              <label className="grouping-toggle">
+                <input
+                  type="checkbox"
+                  checked={showFeedExcluded}
+                  onChange={(event) =>
+                    setShowFeedExcluded(event.target.checked)
+                  }
+                />
+                Voir aussi les publications écartées
+              </label>
+            </div>
+          )}
+
           {view === "folders" && (
             <FolderManager
               folders={data.folders}
@@ -743,6 +919,7 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
           )}
 
           {(view === "personal" ||
+            (view === "feed" && selectedFeed) ||
             view === "all" ||
             view === "saved" ||
             (view === "folders" && selectedFolder) ||
@@ -835,15 +1012,17 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                     <h2 id="feed-title">
                       {view === "personal"
                         ? "Votre sélection"
-                        : view === "saved"
-                          ? "Vos sauvegardes"
-                          : view === "folders"
-                            ? selectedFolder?.name
-                            : view === "evaluation"
-                              ? evaluationFilters.find(
-                                  (filter) => filter.id === evaluationFilter,
-                                )?.label
-                              : "Toutes les publications"}
+                        : view === "feed"
+                          ? "Sélection de ce fil"
+                          : view === "saved"
+                            ? "Vos sauvegardes"
+                            : view === "folders"
+                              ? selectedFolder?.name
+                              : view === "evaluation"
+                                ? evaluationFilters.find(
+                                    (filter) => filter.id === evaluationFilter,
+                                  )?.label
+                                : "Toutes les publications"}
                     </h2>
                     <span className="count-badge">{articles.length}</span>
                   </div>
@@ -1059,7 +1238,15 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                   {feedItems.map((item) => {
                     const onAction = (action: MonitorAction) =>
                       void mutate(
-                        action,
+                        action.action === "setFeedback" &&
+                          view === "feed" &&
+                          selectedFeed
+                          ? {
+                              ...action,
+                              action: "setFeedFeedback",
+                              feedId: selectedFeed.id,
+                            }
+                          : action,
                         "id" in action
                           ? `${action.action}-${action.id}`
                           : action.action,
@@ -1075,6 +1262,9 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                         onOpenFolders={openFolder}
                         busy={busy}
                         onAction={onAction}
+                        feedName={
+                          view === "feed" ? selectedFeed?.name : undefined
+                        }
                       />
                     ) : (
                       <ArticleCard
@@ -1086,6 +1276,9 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                         onOpenFolders={openFolder}
                         busy={busy}
                         onAction={onAction}
+                        feedName={
+                          view === "feed" ? selectedFeed?.name : undefined
+                        }
                       />
                     );
                   })}
@@ -1118,15 +1311,17 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                           ? "Essayez un autre mot-clé ou élargissez vos filtres."
                           : view === "evaluation"
                             ? "Évaluez les publications du flux pour comparer vos retours aux règles de sélection."
-                            : view === "folders"
-                              ? selectedFolder?.archived
-                                ? "Restaurez ce dossier pour y classer des publications."
-                                : "Depuis le flux, utilisez « Classer » pour ajouter des publications à ce dossier."
-                              : view === "saved"
-                                ? "Sauvegardez une publication depuis le flux pour la retrouver ici."
-                                : data.articles.length === 0
-                                  ? "Actualisez les sources pour récupérer les publications disponibles."
-                                  : "Explorez tout le flux ou ajustez les critères de votre profil."}
+                            : view === "feed"
+                              ? "Les analyses disponibles ne dépassent pas encore les seuils de ce fil. Consultez leur progression et ajustez vos consignes ou votre note minimale dans les réglages."
+                              : view === "folders"
+                                ? selectedFolder?.archived
+                                  ? "Restaurez ce dossier pour y classer des publications."
+                                  : "Depuis le flux, utilisez « Classer » pour ajouter des publications à ce dossier."
+                                : view === "saved"
+                                  ? "Sauvegardez une publication depuis le flux pour la retrouver ici."
+                                  : data.articles.length === 0
+                                    ? "Actualisez les sources pour récupérer les publications disponibles."
+                                    : "Explorez tout le flux ou ajustez les critères de votre profil."}
                       </p>
                       {hasFilters ? (
                         <button
@@ -1138,6 +1333,7 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                       ) : view === "saved" ||
                         view === "folders" ||
                         view === "evaluation" ||
+                        view === "feed" ||
                         (view === "personal" && data.articles.length > 0) ? (
                         <button
                           className="button button-secondary"
@@ -1582,6 +1778,7 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
               <div className="profile-aside">
                 <JevPanel
                   state={data.jev}
+                  generalFeed={generalFeed}
                   articles={data.articles}
                   profile={data.profile}
                   busy={busy}
@@ -1947,6 +2144,7 @@ function StoryCard({
   onOpenFolders,
   busy,
   onAction,
+  feedName,
 }: {
   articles: Article[];
   group: StoryGroup;
@@ -1956,6 +2154,7 @@ function StoryCard({
   onOpenFolders: (id?: string) => void;
   busy: boolean;
   onAction: (action: MonitorAction) => void;
+  feedName?: string;
 }) {
   const [lead, ...otherArticles] = articles;
   const sources = [...new Set(articles.map((article) => article.sourceName))];
@@ -1991,6 +2190,7 @@ function StoryCard({
         onOpenFolders={onOpenFolders}
         busy={busy}
         onAction={onAction}
+        feedName={feedName}
       />
       <div className="story-members">
         <p className="story-members-label">Autres publications rapprochées</p>
@@ -2029,7 +2229,7 @@ function StoryCard({
                 onAction={onAction}
               />
             </div>
-            <JevArticleIndicator article={article} />
+            <JevArticleIndicator article={article} feedName={feedName} />
             <ArticleFolders
               article={article}
               folders={folders}
@@ -2049,6 +2249,7 @@ function StoryCard({
                 onOpenFolders={onOpenFolders}
                 busy={busy}
                 onAction={onAction}
+                feedName={feedName}
               />
             </details>
           </div>
@@ -2068,8 +2269,10 @@ function ArticleCard({
   onOpenFolders,
   busy,
   onAction,
+  feedName,
 }: {
   article: Article;
+  feedName?: string;
   matchScope?: Profile["matchScope"];
   grouped?: boolean;
   related?: RelatedPublication[];
@@ -2138,38 +2341,40 @@ function ArticleCard({
             </p>
           </div>
         )}
-        <div className="analysis-details">
-          <span>
-            <span className="analysis-dot" />
-            {matchScope === "title_excerpt"
-              ? article.excerpt
-                ? "Titre et extrait utilisés par les règles"
-                : "Titre seul utilisé par les règles"
-              : article.contentBasis === "feed_text"
-                ? "Texte du flux utilisé par les règles"
-                : article.contentBasis === "page_excerpt"
-                  ? "Extrait de la page utilisé par les règles"
-                  : "Titre seul utilisé par les règles"}
-          </span>
-          {article.reasons.length > 0 && (
-            <details>
-              <summary>Pourquoi ce score de règles ?</summary>
-              <ul>
-                {article.reasons.map((reason, index) => (
-                  <li key={`${reason}-${index}`}>{reason}</li>
-                ))}
-              </ul>
-            </details>
-          )}
-        </div>
-        <JevArticleIndicator article={article} />
+        {!feedName && (
+          <div className="analysis-details">
+            <span>
+              <span className="analysis-dot" />
+              {matchScope === "title_excerpt"
+                ? article.excerpt
+                  ? "Titre et extrait utilisés par les règles"
+                  : "Titre seul utilisé par les règles"
+                : article.contentBasis === "feed_text"
+                  ? "Texte du flux utilisé par les règles"
+                  : article.contentBasis === "page_excerpt"
+                    ? "Extrait de la page utilisé par les règles"
+                    : "Titre seul utilisé par les règles"}
+            </span>
+            {article.reasons.length > 0 && (
+              <details>
+                <summary>Pourquoi ce score de règles ?</summary>
+                <ul>
+                  {article.reasons.map((reason, index) => (
+                    <li key={`${reason}-${index}`}>{reason}</li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </div>
+        )}
+        <JevArticleIndicator article={article} feedName={feedName} />
         {article.feedback && (
           <p className={`feedback-note feedback-note-${article.feedback}`}>
             {article.feedback === "relevant"
               ? "Retenu selon votre retour"
               : article.feedback === "off_topic"
-                ? "Écarté de Pour moi : hors sujet"
-                : "Écarté de Pour moi : déjà vu"}
+                ? `Écarté de ${feedName ?? "Pour moi"} : hors sujet`
+                : `Écarté de ${feedName ?? "Pour moi"} : déjà vu`}
           </p>
         )}
         {article.keepSeparate && (
@@ -2201,14 +2406,30 @@ function ArticleCard({
       </div>
       <div
         className="article-score"
-        aria-label={`Score des règles : ${article.score} mots-clés correspondants`}
+        aria-label={
+          feedName || article.jev?.applied
+            ? `Intérêt Jev : ${article.jev?.score ?? "en attente"} sur 3`
+            : `Score des règles : ${article.score} mots-clés correspondants`
+        }
       >
-        <span>CORRESPONDANCES</span>
-        <strong>{article.score}</strong>
-        <small>
-          mot{article.score > 1 ? "s" : ""}-clé{article.score > 1 ? "s" : ""}{" "}
-          selon les règles
-        </small>
+        <span>
+          {feedName || article.jev?.applied ? "INTÉRÊT JEV" : "CORRESPONDANCES"}
+        </span>
+        <strong>
+          {feedName || article.jev?.applied
+            ? (article.jev?.score ?? "—")
+            : article.score}
+        </strong>
+        {feedName || article.jev?.applied ? (
+          <small>
+            {article.jev ? "sur 3 · selon les consignes" : "analyse en attente"}
+          </small>
+        ) : (
+          <small>
+            mot{article.score > 1 ? "s" : ""}-clé{article.score > 1 ? "s" : ""}{" "}
+            selon les règles
+          </small>
+        )}
       </div>
       {showFolders && (
         <ArticleFolders
@@ -2270,8 +2491,8 @@ function ArticleCard({
                 article.feedback === value
                   ? "Retirer ce retour et réappliquer le mode de sélection"
                   : value === "relevant"
-                    ? "Retenir cette publication dans Pour moi"
-                    : "Retirer cette publication de Pour moi"
+                    ? `Retenir cette publication dans ${feedName ?? "Pour moi"}`
+                    : `Retirer cette publication de ${feedName ?? "Pour moi"}`
               }
               className={`article-action feedback-action ${article.feedback === value ? "is-selected" : ""}`}
               disabled={busy}

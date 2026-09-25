@@ -13,7 +13,14 @@ import { classificationText } from "./profile";
 import { MAX_ACTIVITY_BATCH } from "./activity";
 import { parseFolderName } from "./folders";
 import { collectionState, updateCollectionSchedule } from "./collection-state";
-import { jevSnapshot } from "./jev-store";
+import {
+  jevSnapshot,
+  listCustomFeeds,
+  saveCustomFeed,
+  setCustomFeedArchived,
+  setFeedFeedback,
+} from "./jev-store";
+import type { FeedInput } from "./custom-feeds";
 import type {
   ActivityReview,
   Article,
@@ -209,6 +216,26 @@ export class MonitorStore {
     this.db
       .prepare(`UPDATE articles SET ${field}=? WHERE id=?`)
       .run(typeof value === "boolean" ? Number(value) : value, id);
+  }
+
+  listCustomFeeds() {
+    return listCustomFeeds(this);
+  }
+
+  saveCustomFeed(
+    id: string | null,
+    input: FeedInput,
+    expectedRevision?: number,
+  ) {
+    return saveCustomFeed(this, id, input, expectedRevision);
+  }
+
+  setCustomFeedArchived(id: string, value: boolean) {
+    setCustomFeedArchived(this, id, value);
+  }
+
+  setFeedFeedback(articleId: string, feedId: string, value: Feedback | null) {
+    setFeedFeedback(this, articleId, feedId, value);
   }
 
   updateCollectionSchedule(enabled: boolean, intervalMinutes: number) {
@@ -562,6 +589,12 @@ export class MonitorStore {
       ...(!profileOverride && jev.analyses.has(String(r.id))
         ? { jev: jev.analyses.get(String(r.id))! }
         : {}),
+      ...(!profileOverride && jev.feedAnalyses.has(String(r.id))
+        ? { feedAnalyses: jev.feedAnalyses.get(String(r.id))! }
+        : {}),
+      ...(jev.feedFeedback.has(String(r.id))
+        ? { feedFeedback: jev.feedFeedback.get(String(r.id))! }
+        : {}),
       ...this.classifier.classify(
         classificationText(
           {
@@ -602,6 +635,7 @@ export class MonitorStore {
       evaluation: evaluateSelection(articles, profile),
       collection: this.collectionState(),
       jev: jev.state,
+      customFeeds: jev.feeds,
       activity: {
         startedAt: String(
           this.db

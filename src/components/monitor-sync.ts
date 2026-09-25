@@ -42,5 +42,8 @@ export class MonitorSyncGate {
 export function selectionSnapshotKey(
   snapshot: Pick<Snapshot, "articles" | "profile">,
 ) {
-  return JSON.stringify([snapshot.articles, snapshot.profile]);
+  return JSON.stringify([
+    snapshot.articles.map(({ jev: _jev, ...article }) => article),
+    snapshot.profile,
+  ]);
 }

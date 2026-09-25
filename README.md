@@ -2,7 +2,7 @@
 
 A personal monitoring application for following developments in drones, robotics, and defense technology from sources you choose.
 
-Publications are collected through RSS/Atom or dedicated public-page connectors, stored locally, and selected using an editable keyword profile. Each publication retains its original title, source, language, and link. The interface distinguishes feed text, public-page excerpts, and titles with metadata only.
+Publications are collected through RSS/Atom or dedicated public-page connectors, stored locally, and selected using an editable keyword profile or optional Jev classification. Each publication retains its original title, source, language, and link. The interface distinguishes feed text, public-page excerpts, and titles with metadata only.
 
 ## Getting started
 
@@ -15,7 +15,7 @@ npm run collect
 npm run dev
 ```
 
-Open the address shown in the terminal, usually `http://127.0.0.1:3000`. The SQLite database is created automatically at `data/monitor.sqlite`. No API key is required, and no paid services are called.
+Open the address shown in the terminal, usually `http://127.0.0.1:3000`. The SQLite database is created automatically at `data/monitor.sqlite`. The default keyword mode requires no API key and makes no paid calls. Jev requires separate local configuration and explicit activation.
 
 To run the checks and a production build locally:
 
@@ -71,7 +71,34 @@ An open, visible dashboard refreshes its data every 15 seconds and when you retu
 
 ### Personal selection
 
-Feedback corrects your feed immediately: **Relevant — Pertinent** retains a publication even below the keyword threshold, while **Off-topic — Hors sujet** and **Already seen — Déjà vu** remove it from For me. Click the selected feedback button again to clear the correction and return to the rule-based decision. The article and its read/saved states remain available in the full feed. Feedback does not train a model or change your keywords automatically.
+Feedback corrects your feed immediately: **Relevant — Pertinent** retains a publication even below the keyword threshold, while **Off-topic — Hors sujet** and **Already seen — Déjà vu** remove it from For me. Click the selected feedback button again to clear the correction and return to the active selection mode. The article and its read/saved states remain available in the full feed. Feedback does not train a model or change your keywords automatically.
+
+### Optional Jev selection
+
+Jev can evaluate interest in a publication against your profile and classify its editorial type. It does not generate summaries or verify claims. The integration calls the official TypeSafe API with the pinned model `jev-1.13.0`. TypeSafe documents stronger accuracy in English than other languages; evaluate results on your own French and Ukrainian sources before relying on them. See the [model reference](https://docs.typesafe.ai/models) and [API documentation](https://docs.typesafe.ai/api).
+
+Set these values in your local, Git-ignored `.env.local`, then restart the server:
+
+```dotenv
+TYPESAFE_API_KEY=your_key_here
+DTM_JEV_MONTHLY_BUDGET_USD=1
+```
+
+The budget above is an example; choose your own limit from 0 to 100 USD, with at most two decimal places. The default is 0, which blocks calls. The key stays on the server and is never returned to the browser. Under **Monitoring profile — Profil de veille**, explicitly apply one of these modes:
+
+- **Disabled — Désactivé**: keyword selection, no new Jev calls; cached results remain available for comparison.
+- **Compare with rules — Comparer aux règles**: analyze publications in the background while keyword rules continue to select the personal feed.
+- **Use in For me — Utiliser dans Pour moi**: apply cached Jev decisions when confidence is at least 0.6. A relevance score of at least 2 on the 0–3 rubric includes an article. Missing or uncertain classifications fall back to keywords. Personal feedback always takes precedence.
+
+The comparison shows agreement and differences on the subset with usable cached results, before personal feedback; it is not a measurement of accuracy. The existing evaluation metrics still measure keyword rules against your judgments. Profile previews retain personal feedback but exclude Jev, and never trigger API calls. In Jev personal mode, the normal personal feed orders explicitly relevant items first, then interest scores, with publication dates as a tie-breaker. Activity filters retain their collection-change ordering. Other views retain their existing ordering.
+
+Activation sends the original title, language, available selected text, content provenance, interests and exclusions to TypeSafe. The profile's text scope applies to both engines. Metadata-only publications send no body. Requests are limited to 28 KB of serialized JSON; long content is shortened and labelled accordingly, while oversized profiles are rejected without sending them. Source content is treated as untrusted data. Classification indicators describe the available input, not an unseen full article or the truth of its claims.
+
+The local worker checks every 10 seconds while the server runs, processing up to five requests per batch. New or changed inputs are picked up without blocking collection or page loading. Opening the page, polling, previewing a profile, and building the application make no paid requests. Cache keys include the exact model, rubric, selected content and semantic profile. Read states, saves, feedback and the keyword-count threshold do not invalidate a classification. Pausing prevents subsequent calls; an in-flight call may finish. Cached decisions for outdated inputs are never applied to current publications.
+
+Usage is tracked per UTC calendar month in this database, separately from your TypeSafe account balance. At the documented input price of $0.042 per million tokens, each request first reserves its maximum 64,000-token charge ($0.002688) in a SQLite transaction. A valid response settles the estimate using reported input usage. Timeouts, interrupted requests and unvalidated responses keep the conservative reservation because billing is unknown. Known failures before HTTP release it. Insufficient remaining budget blocks further requests; changing modes or retrying does not erase charges or reservations. This is a local spending guard at the documented rate, not a provider billing statement or an account-wide limit; other databases and applications have separate budgets.
+
+Failures pause processing and show a safe error. Use the explicit retry action after addressing the issue; retries may incur another charge and retain reservations from uncertain attempts. There are no hidden HTTP retries. The application stores decisions and usage locally, and never stores the API key in SQLite. No text-generation provider is configured by this integration.
 
 ### Organizing publications
 
@@ -95,7 +122,7 @@ The evaluation view includes all unjudged publications, including those outside 
 
 Precision is the share of judged rule matches marked relevant. Recall is the share of publications you marked relevant that the rules would select. These figures describe only your judged sample, not the entire feed or the reliability of any claim. Unknown ratios are shown as unavailable; already-seen feedback is counted separately and supplies no relevance label.
 
-The default selection scope remains **All collected text**, including feed text beyond the displayed excerpt. You can instead choose **Title and available excerpt** to reduce matches caused by incidental body mentions. This can also remove useful matches; missing excerpts are never reconstructed from article bodies, and title-only sources still use their titles. Topic labels use the same selected scope. Neither mode downloads additional content.
+The default selection scope remains **All collected text**, including feed text beyond the displayed excerpt. You can instead choose **Title and available excerpt** to reduce matches caused by incidental body mentions. This can also remove useful matches; missing excerpts are never reconstructed from article bodies, and title-only sources still use their titles. Topic labels and optional Jev requests use the same selected scope. Neither scope downloads additional content.
 
 Use **Preview changes — Prévisualiser les changements** to compare a draft profile with the saved one. The preview shows selection counts, entering/leaving publications, and changes to rule mistakes on existing judgments. It uses the same classification and feedback rules as saving, but does not write the profile, articles, or personal state. Editing the draft or changing article data invalidates the preview. **Save profile — Enregistrer mon profil** applies the changes explicitly.
 
@@ -134,12 +161,12 @@ Collection respects `robots.txt`, limits response size, applies timeouts, and va
 - Publication and collection timestamps are separate. Unknown publication dates remain unknown.
 - Available feed text is analyzed up to a limit of 20,000 characters and is not necessarily the complete article. Public-page connectors use only the content available in listing cards: Brave1 provides metadata only, while Defender Media also provides card excerpts. The interface identifies the content used for analysis and displays excerpts of up to 400 characters; the API does not expose the stored article body. Metadata-only publications have no excerpt or generated summary.
 - Full articles are not republished. The application does not bypass paywalls, transcribe videos, or invent summaries from titles.
-- Classification uses deterministic keyword rules, with limitations around synonyms and languages. Matches indicate relevance to a profile, never the reliability of a claim.
+- Classification defaults to deterministic keyword rules, with limitations around synonyms and languages. Optional Jev results supplement selection and editorial labels; theme tags remain rule-based. Matches indicate relevance to a profile, never the reliability of a claim.
 - Repeated imports of a publication from the same source are detected through its identifier or normalized URL. Cross-source grouping requires the same known language, publication dates no more than seven days apart, and matching ordered title words after typographic normalization, including specific terms beyond generic defense vocabulary. When text is available, all collected text must also match in word order, not just the displayed excerpt. All members must match each other; a chain of loosely related articles is insufficient. Missing dates, different languages, changed numbers, follow-up signals, and different or incomplete text prevent grouping. Weaker title matches remain separate with comparison hints. This favors missed matches over hiding new information. It does not translate titles, fetch additional article bodies, or verify claims.
 - This version does not include exhaustive archive imports, generated summaries, alerts, or audio.
 - The database and `.env` files are excluded from Git. The example configuration contains no secrets. To back up local data, stop the application and copy the `data/` directory.
 
-Existing databases are upgraded automatically to schema version 6 when opened. Migrations add content provenance, a per-publication grouping preference, revision-based change tracking, folder storage, and collection scheduling while preserving collected publications, read and saved states, feedback, source activation settings, and the keyword profile. Groups are derived from the current publications; they do not merge or delete database records.
+Existing databases are upgraded automatically to schema version 7 when opened. Migrations add content provenance, a per-publication grouping preference, revision-based change tracking, folder storage, collection scheduling, and optional Jev cache/accounting while preserving collected publications, read and saved states, feedback, source activation settings, and the keyword profile. Groups are derived from the current publications; they do not merge or delete database records.
 
 ## Architecture
 
@@ -156,6 +183,9 @@ src/instrumentation.ts            Server-start worker registration
 src/lib/store.ts                  SQLite persistence and personal state
 src/lib/migrations.ts             Versioned database upgrades
 src/lib/classifier.ts             Replaceable classification and explicit rules
+src/lib/jev-client.ts             Pinned TypeSafe requests, bounded inputs, validated responses
+src/lib/jev-store.ts              Cached decisions, transactional reservations, usage ledger
+src/lib/jev-worker.ts             Optional background classification and explicit recovery
 src/lib/profile.ts                Profile validation and selection text scope
 src/lib/selection.ts              Personal corrections and evaluation of raw rule decisions
 src/lib/activity.ts               Change filters and bounded revision acknowledgements
@@ -170,4 +200,4 @@ scripts/collect.ts                Command-line collection
 tests/                            RSS/Atom, duplicates, selection, and error cases
 ```
 
-Collection, classification, and any future summary generation are separate concerns. Another engine can implement the `Classifier` contract without changing the connectors. A future [Jev](https://docs.typesafe.ai/models) or text-generation integration would require explicit configuration, usage limits, and evaluation on the languages actually used.
+Collection, classification, and any future summary generation are separate concerns. The synchronous `Classifier` contract handles local rules; remote Jev requests run separately and persist their results before snapshots read them. A future text-generation integration would require its own configuration, usage limits, and evaluation.

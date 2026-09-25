@@ -53,12 +53,15 @@ import {
 import {
   matchesProfile,
   matchesEvaluation,
+  comparePersonalPriority,
+  jevDecision,
   type EvaluationFilter,
 } from "@/lib/selection";
 import { ArticleFolders, FolderManager } from "@/components/folder-controls";
 import { CollectionSchedule } from "@/components/collection-schedule";
 import { useMonitorSnapshot } from "@/components/use-monitor-snapshot";
 import { DigestView } from "@/components/digest-view";
+import { JevArticleIndicator, JevPanel } from "@/components/jev-panel";
 
 type View =
   | "personal"
@@ -243,6 +246,9 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
     matchesProfile(article, data.profile),
   );
   const saved = data.articles.filter((article) => article.saved);
+  const jevAppliedCount = data.articles.filter(
+    (article) => article.jev?.applied && jevDecision(article) !== null,
+  ).length;
   const selectedFolder =
     data.folders.find((folder) => folder.id === selectedFolderId) ??
     data.folders.find((folder) => !folder.archived) ??
@@ -308,12 +314,18 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
   ]);
 
   const articles = useMemo(() => {
+    if (
+      view === "personal" &&
+      activityFilter === "all" &&
+      data.jev?.mode === "personal"
+    )
+      return [...filteredArticles].sort(comparePersonalPriority);
     if (view === "evaluation" || activityFilter === "all")
       return filteredArticles;
     return filteredArticles
       .filter((article) => matchesActivity(article, activityFilter))
       .sort(activityOrder);
-  }, [filteredArticles, view, activityFilter]);
+  }, [filteredArticles, view, activityFilter, data.jev?.mode]);
   const activityCounts = {
     all: filteredArticles.length,
     new: filteredArticles.filter((article) => article.changeKind === "new")
@@ -741,21 +753,36 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                   <span className="selection-icon">
                     <Settings2 size={16} />
                   </span>
-                  <span>
-                    Votre sélection s’appuie sur{" "}
-                    <strong>
-                      {data.profile.keywords.length} mot
-                      {data.profile.keywords.length > 1 ? "s" : ""}-clé
-                      {data.profile.keywords.length > 1 ? "s" : ""}
-                    </strong>{" "}
-                    et{" "}
-                    <strong>
-                      {data.profile.minScore} correspondance
-                      {data.profile.minScore > 1 ? "s" : ""} minimale
-                      {data.profile.minScore > 1 ? "s" : ""}
-                    </strong>
-                    , ainsi que sur vos retours.
-                  </span>
+                  {data.jev?.mode === "personal" ? (
+                    <span>
+                      Jev évalue l’intérêt pour votre profil sur{" "}
+                      <strong>
+                        {jevAppliedCount} publication
+                        {jevAppliedCount > 1 ? "s" : ""}
+                      </strong>
+                      . Les règles complètent les{" "}
+                      <strong>
+                        {data.articles.length - jevAppliedCount} restantes
+                      </strong>
+                      . Vos retours restent prioritaires.
+                    </span>
+                  ) : (
+                    <span>
+                      Votre sélection s’appuie sur{" "}
+                      <strong>
+                        {data.profile.keywords.length} mot
+                        {data.profile.keywords.length > 1 ? "s" : ""}-clé
+                        {data.profile.keywords.length > 1 ? "s" : ""}
+                      </strong>{" "}
+                      et{" "}
+                      <strong>
+                        {data.profile.minScore} correspondance
+                        {data.profile.minScore > 1 ? "s" : ""} minimale
+                        {data.profile.minScore > 1 ? "s" : ""}
+                      </strong>
+                      , ainsi que sur vos retours.
+                    </span>
+                  )}
                   <button type="button" onClick={() => changeView("profile")}>
                     Ajuster mon profil <ArrowRight size={14} />
                   </button>
@@ -793,7 +820,7 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                   <p>
                     « Pertinent » ajoute la publication à Pour moi. « Hors sujet
                     » et « Déjà vu » la retirent. Cliquez à nouveau sur votre
-                    retour pour réappliquer les règles.
+                    retour pour réappliquer le mode de sélection.
                   </p>
                   <p>
                     Les écarts ci-dessous portent sur les règles, avant vos
@@ -1456,8 +1483,9 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                     placeholder="Termes à écarter, séparés par des virgules"
                   />
                   <p className="field-help">
-                    Un de ces mots-clés suffit à écarter une publication, sauf
-                    si vous la signalez « Pertinent ».
+                    Un de ces mots-clés suffit à écarter une publication des
+                    règles. Vos retours et le mode Jev choisi déterminent
+                    ensuite sa place dans Pour moi.
                   </p>
                   <label htmlFor="profile-scope">
                     Texte utilisé pour la sélection
@@ -1492,8 +1520,8 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                         Correspondances minimales
                       </label>
                       <p className="field-help">
-                        Nombre de mots-clés différents requis pour entrer dans
-                        la sélection.
+                        Nombre de mots-clés différents requis pour être retenu
+                        par les règles.
                       </p>
                     </div>
                     <div className="number-field">
@@ -1552,6 +1580,13 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                 )}
               </section>
               <div className="profile-aside">
+                <JevPanel
+                  state={data.jev}
+                  articles={data.articles}
+                  profile={data.profile}
+                  busy={busy}
+                  onAction={(action) => mutate(action)}
+                />
                 <section
                   className="panel evaluation-panel"
                   aria-labelledby="evaluation-title"
@@ -1672,8 +1707,8 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                     « Pertinent » retient la publication dans Pour moi, même
                     sous le seuil ou en présence d’une exclusion. « Hors sujet »
                     et « Déjà vu » la retirent de cette vue. Cliquez à nouveau
-                    sur le retour actif pour réappliquer les règles. Les
-                    publications restent accessibles dans Tout le flux.
+                    sur le retour actif pour réappliquer le mode de sélection.
+                    Les publications restent accessibles dans Tout le flux.
                   </p>
                   <p>
                     Vos retours ne modifient pas automatiquement les mots-clés
@@ -1718,12 +1753,13 @@ function ProfilePreviewPanel({
         <h2 id="preview-title">Prévisualisation non enregistrée</h2>
       </div>
       <p className="muted">
-        Ces résultats utilisent les publications déjà collectées. Enregistrez
-        votre profil pour appliquer les changements.
+        Cette prévisualisation applique les règles et vos retours aux
+        publications déjà collectées, sans Jev. Enregistrez votre profil pour
+        appliquer les changements.
       </p>
       <dl className="preview-counts">
         <div>
-          <dt>Dans Pour moi, avec vos retours</dt>
+          <dt>Sélection sans Jev, avec vos retours</dt>
           <dd>
             {preview.currentSelected} <ArrowRight size={15} aria-label="vers" />{" "}
             {preview.selected}
@@ -1756,12 +1792,12 @@ function ProfilePreviewPanel({
       </p>
       {[
         {
-          label: "Publications qui entreraient dans Pour moi",
+          label: "Publications ajoutées à la sélection sans Jev",
           articles: preview.entered,
           empty: "Aucune nouvelle publication retenue.",
         },
         {
-          label: "Publications qui quitteraient Pour moi",
+          label: "Publications retirées de la sélection sans Jev",
           articles: preview.exited,
           empty: "Aucune publication retirée.",
         },
@@ -1993,6 +2029,7 @@ function StoryCard({
                 onAction={onAction}
               />
             </div>
+            <JevArticleIndicator article={article} />
             <ArticleFolders
               article={article}
               folders={folders}
@@ -2106,17 +2143,17 @@ function ArticleCard({
             <span className="analysis-dot" />
             {matchScope === "title_excerpt"
               ? article.excerpt
-                ? "Titre et extrait utilisés pour la sélection"
-                : "Titre seul utilisé pour la sélection"
+                ? "Titre et extrait utilisés par les règles"
+                : "Titre seul utilisé par les règles"
               : article.contentBasis === "feed_text"
-                ? "Texte du flux analysé"
+                ? "Texte du flux utilisé par les règles"
                 : article.contentBasis === "page_excerpt"
-                  ? "Extrait de la page analysé"
-                  : "Titre seul analysé"}
+                  ? "Extrait de la page utilisé par les règles"
+                  : "Titre seul utilisé par les règles"}
           </span>
           {article.reasons.length > 0 && (
             <details>
-              <summary>Pourquoi ce score ?</summary>
+              <summary>Pourquoi ce score de règles ?</summary>
               <ul>
                 {article.reasons.map((reason, index) => (
                   <li key={`${reason}-${index}`}>{reason}</li>
@@ -2125,6 +2162,7 @@ function ArticleCard({
             </details>
           )}
         </div>
+        <JevArticleIndicator article={article} />
         {article.feedback && (
           <p className={`feedback-note feedback-note-${article.feedback}`}>
             {article.feedback === "relevant"
@@ -2230,7 +2268,7 @@ function ArticleCard({
               aria-pressed={article.feedback === value}
               title={
                 article.feedback === value
-                  ? "Retirer ce retour et réappliquer les règles"
+                  ? "Retirer ce retour et réappliquer le mode de sélection"
                   : value === "relevant"
                     ? "Retenir cette publication dans Pour moi"
                     : "Retirer cette publication de Pour moi"

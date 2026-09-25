@@ -13,6 +13,7 @@ import { classificationText } from "./profile";
 import { MAX_ACTIVITY_BATCH } from "./activity";
 import { parseFolderName } from "./folders";
 import { collectionState, updateCollectionSchedule } from "./collection-state";
+import { jevSnapshot } from "./jev-store";
 import type {
   ActivityReview,
   Article,
@@ -451,7 +452,7 @@ export class MonitorStore {
   }
 
   previewProfile(profile: Profile): ProfilePreview {
-    const current = this.snapshot();
+    const current = this.snapshot(this.profile());
     const preview = this.snapshot(profile);
     const currentIds = new Set(
       current.articles
@@ -521,6 +522,18 @@ export class MonitorStore {
         "SELECT a.*,s.name AS source_name FROM articles a JOIN sources s ON s.id=a.source_id ORDER BY COALESCE(a.published_at,a.collected_at) DESC",
       )
       .all() as Row[];
+    const jev = jevSnapshot(
+      this,
+      rows.map((row) => ({
+        id: String(row.id),
+        title: String(row.title),
+        text: String(row.text),
+        excerpt: row.excerpt as string | null,
+        language: String(row.language),
+        contentBasis: row.content_basis as Article["contentBasis"],
+      })),
+      profileOverride ? this.profile() : profile,
+    );
     const articles: Article[] = rows.map((r) => ({
       id: String(r.id),
       sourceId: String(r.source_id),
@@ -546,6 +559,9 @@ export class MonitorStore {
       feedback: r.feedback as Feedback | null,
       keepSeparate: !!r.keep_separate,
       folderIds: memberships.get(String(r.id)) ?? [],
+      ...(!profileOverride && jev.analyses.has(String(r.id))
+        ? { jev: jev.analyses.get(String(r.id))! }
+        : {}),
       ...this.classifier.classify(
         classificationText(
           {
@@ -585,6 +601,7 @@ export class MonitorStore {
       },
       evaluation: evaluateSelection(articles, profile),
       collection: this.collectionState(),
+      jev: jev.state,
       activity: {
         startedAt: String(
           this.db

@@ -218,6 +218,7 @@ export function digestSnapshotKey(snapshot: Snapshot): string {
       themes: article.themes,
       excerpt: article.excerpt,
       contentBasis: article.contentBasis,
+      jev: article.jev,
       score: article.score,
       reasons: article.reasons,
       feedback: article.feedback,

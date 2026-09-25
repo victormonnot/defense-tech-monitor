@@ -1,6 +1,42 @@
 import type { Article, Evaluation, Profile } from "./types";
 
-type SelectionArticle = Pick<Article, "score" | "feedback">;
+type SelectionArticle = Pick<Article, "score" | "feedback" | "jev">;
+
+export const JEV_MIN_CONFIDENCE = 0.6;
+export const JEV_MIN_RELEVANCE = 2;
+
+/** A classification is an interest judgment, never a source reliability score. */
+export function jevDecision(article: Pick<Article, "jev">): boolean | null {
+  const result = article.jev;
+  if (
+    !result ||
+    !Number.isFinite(result.score) ||
+    result.score < 0 ||
+    result.score > 3 ||
+    !Number.isFinite(result.confidence) ||
+    result.confidence < JEV_MIN_CONFIDENCE ||
+    result.confidence > 1
+  )
+    return null;
+  return result.score >= JEV_MIN_RELEVANCE;
+}
+
+/** Explicit feedback leads; unclassified/uncertain items retain chronological order. */
+export function comparePersonalPriority(a: Article, b: Article): number {
+  const priority = (article: Article) =>
+    article.feedback === "relevant"
+      ? 4
+      : article.jev?.applied && jevDecision(article) !== null
+        ? article.jev.score
+        : JEV_MIN_RELEVANCE;
+  const date = (article: Article) => {
+    const value = Date.parse(article.publishedAt ?? article.collectedAt);
+    return Number.isFinite(value) ? value : 0;
+  };
+  return (
+    priority(b) - priority(a) || date(b) - date(a) || a.id.localeCompare(b.id)
+  );
+}
 
 export type EvaluationFilter =
   | "unreviewed"
@@ -22,6 +58,10 @@ export function matchesProfile(
   if (article.feedback === "relevant") return true;
   if (article.feedback === "off_topic" || article.feedback === "seen")
     return false;
+  if (article.jev?.applied) {
+    const decision = jevDecision(article);
+    if (decision !== null) return decision;
+  }
   return matchesRules(article, profile);
 }
 

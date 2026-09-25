@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-const CURRENT_VERSION = 6;
+const CURRENT_VERSION = 7;
 
 export function migrate(db: DatabaseSync) {
   db.exec("BEGIN IMMEDIATE");
@@ -100,6 +100,25 @@ export function migrate(db: DatabaseSync) {
           result TEXT, error TEXT
         );
         PRAGMA user_version = 6;
+      `);
+    }
+    if (version < 7) {
+      db.exec(`
+        INSERT OR IGNORE INTO settings (key,value) VALUES ('jev_mode','off');
+        CREATE TABLE jev_attempts (
+          id TEXT PRIMARY KEY, cache_key TEXT NOT NULL, month TEXT NOT NULL,
+          reserved_nanos INTEGER NOT NULL CHECK(reserved_nanos >= 0),
+          settled_nanos INTEGER CHECK(settled_nanos >= 0), input_tokens INTEGER CHECK(input_tokens >= 0),
+          started_at TEXT NOT NULL, finished_at TEXT,
+          status TEXT NOT NULL CHECK(status IN ('running','success','failed'))
+        );
+        CREATE INDEX jev_attempts_month ON jev_attempts(month);
+        CREATE TABLE jev_cache (
+          cache_key TEXT PRIMARY KEY, attempt_id TEXT NOT NULL REFERENCES jev_attempts(id),
+          status TEXT NOT NULL CHECK(status IN ('running','success','failed')),
+          lease_expires_at TEXT, result TEXT, evaluated_at TEXT, error TEXT
+        );
+        PRAGMA user_version = 7;
       `);
     }
     db.exec("COMMIT");

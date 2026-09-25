@@ -8,6 +8,7 @@ import { parseProfile } from "@/lib/profile";
 import { parseActivityBatch } from "@/lib/activity";
 import { parseFolderName } from "@/lib/folders";
 import { parseCollectionSchedule } from "@/lib/collection-state";
+import { setJevMode, retryJevFailures } from "@/lib/jev-store";
 import type { Feedback } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -57,6 +58,28 @@ export async function POST(request: NextRequest) {
     const store = getStore();
     let message: string | undefined;
     switch (body.action) {
+      case "setJevMode": {
+        if (
+          body.mode !== "off" &&
+          body.mode !== "compare" &&
+          body.mode !== "personal"
+        )
+          throw new Error("Mode Jev invalide.");
+        setJevMode(store, body.mode);
+        message =
+          body.mode === "off"
+            ? "Analyse Jev en pause. Les règles déterminent la sélection."
+            : body.mode === "compare"
+              ? "Comparaison Jev activée. Les règles déterminent encore la sélection."
+              : "Sélection Jev activée. Les règles s’appliquent aux analyses absentes ou incertaines.";
+        break;
+      }
+      case "retryJevFailures": {
+        retryJevFailures(store);
+        message =
+          "Les analyses Jev en échec pourront être réessayées dans la limite du budget restant.";
+        break;
+      }
       case "updateCollectionSchedule": {
         const schedule = parseCollectionSchedule(
           body.enabled,

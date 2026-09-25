@@ -109,6 +109,28 @@ test("scheduler activity alone preserves a profile preview while publications, r
   };
   assert.equal(selectionSnapshotKey(scheduled), initial);
   assert.equal(selectionSnapshotKey(structuredClone(snapshot)), initial);
+  assert.equal(
+    selectionSnapshotKey({
+      ...snapshot,
+      articles: [
+        {
+          ...article,
+          jev: {
+            score: 3,
+            confidence: 0.9,
+            kind: "technical",
+            kindConfidence: 0.9,
+            model: "jev-1.13.0",
+            evaluatedAt: "2026-09-25T00:00:00Z",
+            applied: true,
+            scope: "all_text",
+            truncated: false,
+          },
+        },
+      ],
+    }),
+    initial,
+  );
   for (const change of [
     { articles: [...snapshot.articles, { ...article, id: "second" }] },
     { articles: [{ ...article, revision: 2 }] },

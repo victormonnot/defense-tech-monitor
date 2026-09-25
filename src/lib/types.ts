@@ -1,4 +1,5 @@
 import type { StoryGroup, StoryRelation } from "./stories";
+import type { JevAnalysis, JevMode, JevState } from "./jev-types";
 
 export type Feedback = "relevant" | "off_topic" | "seen";
 export type SourceStatus = "pending" | "ok" | "empty" | "error" | "unsupported";
@@ -43,6 +44,7 @@ export interface Article {
   feedback: Feedback | null;
   keepSeparate: boolean;
   folderIds: string[];
+  jev?: JevAnalysis;
 }
 
 export interface Folder {
@@ -117,6 +119,7 @@ export interface Snapshot {
   stats: { total: number; selected: number; unread: number; saved: number };
   evaluation: Evaluation;
   collection: CollectionState;
+  jev?: JevState;
   activity: {
     startedAt: string;
     lastReviewedAt: string | null;
@@ -133,6 +136,8 @@ export interface ActivityReview {
 
 export type MonitorAction =
   | { action: "collect" }
+  | { action: "setJevMode"; mode: JevMode }
+  | { action: "retryJevFailures" }
   | {
       action: "updateCollectionSchedule";
       enabled: boolean;

@@ -28,6 +28,9 @@ export interface Article {
   url: string;
   publishedAt: string | null;
   collectedAt: string;
+  updatedAt: string | null;
+  revision: number;
+  changeKind: "new" | "updated" | null;
   language: string;
   format: "article" | "video";
   themes: string[];
@@ -77,7 +80,18 @@ export interface Snapshot {
   stories: { groups: StoryGroup[]; related: StoryRelation[] };
   stats: { total: number; selected: number; unread: number; saved: number };
   evaluation: Evaluation;
+  activity: {
+    startedAt: string;
+    lastReviewedAt: string | null;
+    newCount: number;
+    updatedCount: number;
+  };
   lastCollectionAt: string | null;
+}
+
+export interface ActivityReview {
+  id: string;
+  revision: number;
 }
 
 export type MonitorAction =
@@ -94,5 +108,6 @@ export type MonitorAction =
   | { action: "setSaved"; id: string; value: boolean }
   | { action: "setSeparate"; id: string; value: boolean }
   | { action: "setFeedback"; id: string; value: Feedback | null }
+  | { action: "acknowledgeChanges"; articles: ActivityReview[] }
   | { action: "previewProfile"; profile: Profile }
   | { action: "updateProfile"; profile: Profile };

@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-const CURRENT_VERSION = 3;
+const CURRENT_VERSION = 4;
 
 export function migrate(db: DatabaseSync) {
   db.exec("BEGIN IMMEDIATE");
@@ -54,6 +54,18 @@ export function migrate(db: DatabaseSync) {
           CHECK(keep_separate IN (0, 1));
         PRAGMA user_version = 3;
       `);
+    }
+    if (version < 4) {
+      db.exec(`
+        ALTER TABLE articles ADD COLUMN revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1);
+        ALTER TABLE articles ADD COLUMN reviewed_revision INTEGER NOT NULL DEFAULT 0 CHECK(reviewed_revision >= 0);
+        ALTER TABLE articles ADD COLUMN updated_at TEXT;
+        UPDATE articles SET reviewed_revision=revision;
+        PRAGMA user_version = 4;
+      `);
+      db.prepare(
+        "INSERT OR IGNORE INTO settings (key,value) VALUES ('activity_started_at',?)",
+      ).run(new Date().toISOString());
     }
     db.exec("COMMIT");
   } catch (error) {

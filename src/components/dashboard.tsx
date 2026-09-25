@@ -41,6 +41,13 @@ import type {
 import type { StoryGroup } from "@/lib/stories";
 import { buildFeedItems } from "@/lib/story-feed";
 import {
+  activityOrder,
+  matchesActivity,
+  MAX_ACTIVITY_BATCH,
+  reviewBatch,
+  type ActivityFilter,
+} from "@/lib/activity";
+import {
   matchesProfile,
   matchesEvaluation,
   type EvaluationFilter,
@@ -141,6 +148,12 @@ const evaluationFilters: { id: EvaluationFilter; label: string }[] = [
   { id: "reviewed", label: "Tous les retours" },
 ];
 
+const activityFilters: { id: ActivityFilter; label: string }[] = [
+  { id: "all", label: "Toutes" },
+  { id: "new", label: "Nouvelles" },
+  { id: "updated", label: "Actualisées" },
+];
+
 function percentage(value: number | null) {
   return value === null
     ? "—"
@@ -171,6 +184,7 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
   const [languageFilter, setLanguageFilter] = useState("");
   const [themeFilter, setThemeFilter] = useState("");
   const [formatFilter, setFormatFilter] = useState("");
+  const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all");
   const [groupStories, setGroupStories] = useState(true);
   const [evaluationFilter, setEvaluationFilter] =
     useState<EvaluationFilter>("unreviewed");
@@ -197,7 +211,12 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
   const saved = data.articles.filter((article) => article.saved);
   const enabledSources = data.sources.filter((source) => source.enabled).length;
   const hasFilters = Boolean(
-    search || sourceFilter || languageFilter || themeFilter || formatFilter,
+    search ||
+    sourceFilter ||
+    languageFilter ||
+    themeFilter ||
+    formatFilter ||
+    (view !== "evaluation" && activityFilter !== "all"),
   );
   const languages = [
     ...new Set(data.articles.map((article) => article.language)),
@@ -206,7 +225,7 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
     ...new Set(data.articles.flatMap((article) => article.themes)),
   ].sort((a, b) => a.localeCompare(b, "fr"));
 
-  const articles = useMemo(() => {
+  const filteredArticles = useMemo(() => {
     const query = search.trim().toLocaleLowerCase("fr");
     return data.articles.filter((article) => {
       if (view === "personal" && !matchesProfile(article, data.profile))
@@ -242,6 +261,26 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
     formatFilter,
     evaluationFilter,
   ]);
+
+  const articles = useMemo(() => {
+    if (view === "evaluation" || activityFilter === "all")
+      return filteredArticles;
+    return filteredArticles
+      .filter((article) => matchesActivity(article, activityFilter))
+      .sort(activityOrder);
+  }, [filteredArticles, view, activityFilter]);
+  const activityCounts = {
+    all: filteredArticles.length,
+    new: filteredArticles.filter((article) => article.changeKind === "new")
+      .length,
+    updated: filteredArticles.filter(
+      (article) => article.changeKind === "updated",
+    ).length,
+  };
+  const visibleChanges = articles.filter(
+    (article) => article.changeKind,
+  ).length;
+  const activityBatch = reviewBatch(articles);
 
   const feedItems = useMemo(
     () =>
@@ -376,6 +415,7 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
     setLanguageFilter("");
     setThemeFilter("");
     setFormatFilter("");
+    setActivityFilter("all");
   }
 
   function changeView(next: View) {
@@ -742,6 +782,104 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                     )}
                   </div>
                 </div>
+                {view !== "evaluation" && (
+                  <section
+                    className="activity-controls"
+                    aria-label="Nouveautés de la veille"
+                  >
+                    <div className="activity-heading">
+                      <div>
+                        <h3>Votre point de veille</h3>
+                        <p className="activity-context">
+                          {data.activity.lastReviewedAt
+                            ? "Dernière validation : "
+                            : "Suivi des nouveautés depuis le "}
+                          <time
+                            dateTime={
+                              data.activity.lastReviewedAt ??
+                              data.activity.startedAt
+                            }
+                          >
+                            {dateLabel(
+                              data.activity.lastReviewedAt ??
+                                data.activity.startedAt,
+                              true,
+                            )}
+                          </time>
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        className="button button-secondary activity-review"
+                        disabled={busy || activityBatch.length === 0}
+                        onClick={() =>
+                          void mutate({
+                            action: "acknowledgeChanges",
+                            articles: activityBatch,
+                          })
+                        }
+                      >
+                        {pending === "acknowledgeChanges" ? (
+                          <LoaderCircle size={16} className="spin" />
+                        ) : (
+                          <CheckCheck size={16} />
+                        )}
+                        <span>
+                          Valider les nouveautés affichées (
+                          {activityBatch.length})
+                        </span>
+                      </button>
+                    </div>
+                    <div
+                      className="activity-tabs"
+                      role="group"
+                      aria-label="Filtrer par nouveauté"
+                    >
+                      {activityFilters.map(({ id, label }) => (
+                        <button
+                          key={id}
+                          type="button"
+                          aria-pressed={activityFilter === id}
+                          className={`activity-tab ${activityFilter === id ? "is-selected" : ""}`}
+                          onClick={() => setActivityFilter(id)}
+                        >
+                          {label}
+                          <span>{activityCounts[id]}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <p className="activity-help">
+                      Validez les publications de cette vue sans les marquer
+                      comme lues.
+                      {activityFilter !== "all" &&
+                        " Les dernières collectes ou modifications apparaissent en premier."}
+                    </p>
+                    <details className="activity-explanation">
+                      <summary>Comprendre les repères</summary>
+                      <p className="activity-help">
+                        « Nouvelle » signale une première collecte, même pour
+                        une publication ancienne. « Actualisée » signale une
+                        modification des données collectées. Ces repères restent
+                        présents jusqu’à validation, indépendamment de l’état
+                        lu.
+                      </p>
+                      <p className="activity-help">
+                        Les compteurs suivent vos filtres. Valider retire les
+                        repères des publications affichées, y compris dans les
+                        regroupements. Les publications masquées par vos filtres
+                        conservent leurs repères.
+                      </p>
+                    </details>
+                    {visibleChanges > MAX_ACTIVITY_BATCH && (
+                      <p className="activity-limit" role="status">
+                        Les {MAX_ACTIVITY_BATCH} premières nouveautés de cette
+                        vue seront validées. Les{" "}
+                        {visibleChanges - MAX_ACTIVITY_BATCH} suivantes
+                        conserveront leur repère.
+                      </p>
+                    )}
+                  </section>
+                )}
                 <div className="feed-display-controls">
                   {view !== "evaluation" && (
                     <label className="grouping-toggle">
@@ -1598,6 +1736,24 @@ function SeparateAction({
   );
 }
 
+function ActivityBadge({ article }: { article: Article }) {
+  if (!article.changeKind) return null;
+  const label = article.changeKind === "new" ? "Nouvelle" : "Actualisée";
+  const description =
+    article.changeKind === "new"
+      ? `Première collecte le ${dateLabel(article.collectedAt, true)}`
+      : `Modification des données collectées détectée le ${dateLabel(article.updatedAt, true)}`;
+  return (
+    <span
+      className={`activity-badge activity-badge-${article.changeKind}`}
+      title={description}
+      aria-label={`${label} : ${description}`}
+    >
+      {label}
+    </span>
+  );
+}
+
 function StoryCard({
   articles,
   group,
@@ -1658,6 +1814,7 @@ function StoryCard({
               </time>
               <span className="meta-dot">·</span>
               <span>{languageLabel(article.language)}</span>
+              <ActivityBadge article={article} />
             </div>
             <h3>
               <a href={article.url} target="_blank" rel="noreferrer">
@@ -1738,6 +1895,7 @@ function ArticleCard({
           <span className="format-tag">
             {article.format === "video" ? "Vidéo" : "Article"}
           </span>
+          <ActivityBadge article={article} />
           {article.isRead && (
             <span className="read-label">
               <Check size={12} /> Lu

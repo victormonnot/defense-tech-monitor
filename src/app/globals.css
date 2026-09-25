@@ -571,6 +571,108 @@ h2 {
   font-size: 0.75rem;
   color: #63758d;
 }
+.activity-controls {
+  border: 1px solid #dce4ef;
+  border-radius: 9px;
+  background: #f8fafd;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.activity-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+  margin-bottom: 14px;
+}
+.activity-heading h3 {
+  font-size: 0.9375rem;
+  font-weight: 650;
+}
+.activity-context {
+  color: #586a82;
+  font-size: 0.75rem;
+  margin-top: 4px;
+}
+.activity-review {
+  min-height: 42px;
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+}
+.activity-review svg {
+  flex-shrink: 0;
+}
+.activity-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.activity-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 42px;
+  padding: 8px 12px;
+  border: 1px solid #dce2eb;
+  border-radius: 7px;
+  background: white;
+  color: #52647e;
+  font-size: 0.875rem;
+}
+.activity-tab.is-selected {
+  background: var(--blue-light);
+  border-color: #becff7;
+  color: #305ab9;
+}
+.activity-tab > span {
+  background: #e9edf4;
+  border-radius: 4px;
+  padding: 0 6px;
+  font-size: 0.75rem;
+}
+.activity-help,
+.activity-limit {
+  color: #586a82;
+  font-size: 0.8125rem;
+  line-height: 1.7;
+  margin: 6px 0 0;
+}
+.activity-limit {
+  color: #775515;
+  font-weight: 550;
+}
+.activity-explanation {
+  margin-top: 4px;
+}
+.activity-explanation summary {
+  cursor: pointer;
+  color: #496b9e;
+  width: fit-content;
+  max-width: 100%;
+  border-radius: 3px;
+  padding: 6px 0;
+  font-size: 0.8125rem;
+}
+.activity-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.65;
+}
+.activity-badge-new {
+  color: #225f49;
+  background: #e4f2e9;
+}
+.activity-badge-updated {
+  color: #815a15;
+  background: #fff1d8;
+}
 .story-card {
   min-width: 0;
   background: white;

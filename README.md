@@ -43,6 +43,14 @@ Start collection with **Refresh sources — Actualiser les sources** or `npm run
 
 Feedback corrects your feed immediately: **Relevant — Pertinent** retains a publication even below the keyword threshold, while **Off-topic — Hors sujet** and **Already seen — Déjà vu** remove it from For me. Click the selected feedback button again to clear the correction and return to the rule-based decision. The article and its read/saved states remain available in the full feed. Feedback does not train a model or change your keywords automatically.
 
+### Catching up on collected changes
+
+For me, Full feed, and Saved offer filters for new and updated publications. **New** means first collected since you last acknowledged that publication, regardless of its original publication date. **Updated** means its collected title, text, excerpt, URL, date, language, format, or content provenance changed after acknowledgement. These labels describe changes in collected data; they do not establish that a claim or event is new. Activity filters show the latest collection changes first.
+
+Use **Acknowledge displayed changes — Valider les nouveautés affichées** to finish a monitoring pass. It acknowledges only pending publications matching the current view, search, and filters, including each displayed member of a group. Batches are limited to 200 publications; repeat the action when more remain. Read, saved, and feedback states are independent. Opening or reloading the page does not acknowledge anything, and publications hidden by filters remain pending.
+
+Acknowledgements record the exact article revisions displayed. If collection changes an article while you review it, that newer revision remains pending. Identical imports do not create updates. Existing publications form the baseline when upgrading an older database; the application does not infer past visits or mark the entire archive as new.
+
 ### Evaluating and adjusting selection
 
 The evaluation view includes all unjudged publications, including those outside For me, so you can find missed topics as well as broad matches. Its mistake filters compare your relevance judgments with the raw keyword decision, before applying manual corrections. An article marked relevant can therefore remain listed as a rule miss even though your correction puts it in For me.
@@ -91,7 +99,7 @@ Collection respects `robots.txt`, limits response size, applies timeouts, and va
 - This version does not include exhaustive archive imports, generated summaries, topic folders, alerts, or audio.
 - The database and `.env` files are excluded from Git. The example configuration contains no secrets. To back up local data, stop the application and copy the `data/` directory.
 
-Existing databases are upgraded automatically to schema version 3 when opened. Migrations add content provenance and a per-publication grouping preference while preserving collected publications, read and saved states, feedback, source activation settings, and the keyword profile. Groups are derived from the current publications; they do not merge or delete database records.
+Existing databases are upgraded automatically to schema version 4 when opened. Migrations add content provenance, a per-publication grouping preference, and revision-based change tracking while preserving collected publications, read and saved states, feedback, source activation settings, and the keyword profile. Groups are derived from the current publications; they do not merge or delete database records.
 
 ## Architecture
 
@@ -107,6 +115,7 @@ src/lib/migrations.ts  Versioned database upgrades
 src/lib/classifier.ts  Replaceable classification and explicit rules
 src/lib/profile.ts     Profile validation and selection text scope
 src/lib/selection.ts   Personal corrections and evaluation of raw rule decisions
+src/lib/activity.ts    Change filters and bounded revision acknowledgements
 src/lib/stories.ts     Conservative announcement grouping and comparison hints
 src/lib/story-feed.ts  Group presentation after view and search filters
 src/app/api/monitor/   Local reads and mutations

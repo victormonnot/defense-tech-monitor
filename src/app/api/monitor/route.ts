@@ -5,6 +5,7 @@ import { canonicalUrl, publicUrl } from "@/lib/feed";
 import { validateRemoteUrl } from "@/lib/network";
 import { getStore } from "@/lib/store";
 import { parseProfile } from "@/lib/profile";
+import { parseActivityBatch } from "@/lib/activity";
 import type { Feedback } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -125,6 +126,21 @@ export async function POST(request: NextRequest) {
         return json({
           preview: store.previewProfile(parseProfile(body.profile)),
         });
+      }
+      case "acknowledgeChanges": {
+        const articles = parseActivityBatch(body.articles);
+        const count = store.acknowledgeChanges(articles);
+        const snapshot = store.snapshot();
+        const submitted = new Set(articles.map(({ id }) => id));
+        const newer = snapshot.articles.filter(
+          (article) => submitted.has(article.id) && article.changeKind !== null,
+        ).length;
+        message = count
+          ? `${count} publication(s) validée(s) pour ce point de veille. Les états de lecture sont conservés.`
+          : "Ces nouveautés ont déjà été validées.";
+        if (newer)
+          message += ` ${newer} publication(s) ont des modifications plus récentes qui restent à valider.`;
+        return json({ snapshot, message });
       }
       case "updateProfile": {
         const profile = parseProfile(body.profile);

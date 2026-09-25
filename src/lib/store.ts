@@ -10,7 +10,9 @@ import { resolveCollection } from "./connectors";
 import { buildStories } from "./stories";
 import { evaluateSelection, matchesProfile } from "./selection";
 import { classificationText } from "./profile";
+import { MAX_ACTIVITY_BATCH } from "./activity";
 import type {
+  ActivityReview,
   Article,
   Feedback,
   Profile,
@@ -196,6 +198,62 @@ export class MonitorStore {
       .run(typeof value === "boolean" ? Number(value) : value, id);
   }
 
+  acknowledgeChanges(items: ActivityReview[]): number {
+    if (
+      !Array.isArray(items) ||
+      items.length > MAX_ACTIVITY_BATCH ||
+      items.some(
+        (item) =>
+          !item ||
+          typeof item !== "object" ||
+          Array.isArray(item) ||
+          typeof item.id !== "string" ||
+          !item.id.trim() ||
+          item.id !== item.id.trim() ||
+          item.id.length > 200 ||
+          !Number.isSafeInteger(item.revision) ||
+          item.revision < 1,
+      )
+    ) {
+      throw new Error("Publications à valider invalides.");
+    }
+    const revisions = new Map<string, number>();
+    for (const item of items)
+      revisions.set(
+        item.id,
+        Math.max(revisions.get(item.id) ?? 0, item.revision),
+      );
+    let advanced = 0;
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const find = this.db.prepare(
+        "SELECT revision,reviewed_revision FROM articles WHERE id=?",
+      );
+      const acknowledge = this.db.prepare(
+        "UPDATE articles SET reviewed_revision=? WHERE id=? AND reviewed_revision<?",
+      );
+      for (const [id, revision] of revisions) {
+        const article = find.get(id) as Row | undefined;
+        if (!article || revision > Number(article.revision))
+          throw new Error(
+            "Publication inconnue ou version plus récente que celle enregistrée.",
+          );
+        advanced += Number(acknowledge.run(revision, id, revision).changes);
+      }
+      if (advanced > 0)
+        this.db
+          .prepare(
+            "INSERT INTO settings (key,value) VALUES ('activity_last_reviewed_at',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+          )
+          .run(new Date().toISOString());
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    return advanced;
+  }
+
   upsertEntries(sourceId: string, entries: FeedEntry[], collectedAt: string) {
     let added = 0;
     let updated = 0;
@@ -204,16 +262,33 @@ export class MonitorStore {
       for (const entry of entries) {
         const existing = this.db
           .prepare(
-            "SELECT id,content_hash FROM articles WHERE source_id=? AND (guid=? OR url=?) LIMIT 1",
+            "SELECT id,url,title,published_at,text,excerpt,language,format,content_hash,content_basis FROM articles WHERE source_id=? AND (guid=? OR url=?) LIMIT 1",
           )
           .get(sourceId, entry.guid, entry.url) as Row | undefined;
         const contentBasis =
           entry.contentBasis ?? (entry.text ? "feed_text" : "metadata");
-        if (existing?.content_hash === entry.contentHash) continue;
         if (existing) {
+          const contentChanged =
+            existing.url !== entry.url ||
+            existing.title !== entry.title ||
+            existing.published_at !== entry.publishedAt ||
+            existing.text !== entry.text ||
+            existing.excerpt !== entry.excerpt ||
+            existing.language !== entry.language ||
+            existing.format !== entry.format ||
+            existing.content_basis !== contentBasis;
+          if (!contentChanged) {
+            if (existing.content_hash !== entry.contentHash) {
+              this.db
+                .prepare("UPDATE articles SET content_hash=? WHERE id=?")
+                .run(entry.contentHash, existing.id);
+              updated++;
+            }
+            continue;
+          }
           this.db
             .prepare(
-              "UPDATE articles SET url=?,title=?,published_at=?,text=?,excerpt=?,language=?,format=?,content_hash=?,content_basis=? WHERE id=?",
+              "UPDATE articles SET url=?,title=?,published_at=?,text=?,excerpt=?,language=?,format=?,content_hash=?,content_basis=?,revision=revision+1,updated_at=? WHERE id=?",
             )
             .run(
               entry.url,
@@ -225,6 +300,7 @@ export class MonitorStore {
               entry.format,
               entry.contentHash,
               contentBasis,
+              collectedAt,
               existing.id,
             );
           updated++;
@@ -302,6 +378,14 @@ export class MonitorStore {
       url: String(r.url),
       publishedAt: r.published_at as string | null,
       collectedAt: String(r.collected_at),
+      revision: Number(r.revision),
+      changeKind:
+        Number(r.reviewed_revision) === 0
+          ? "new"
+          : Number(r.reviewed_revision) < Number(r.revision)
+            ? "updated"
+            : null,
+      updatedAt: r.updated_at as string | null,
       language: String(r.language),
       format: r.format as Article["format"],
       excerpt: r.excerpt as string | null,
@@ -347,6 +431,26 @@ export class MonitorStore {
         saved: articles.filter((a) => a.saved).length,
       },
       evaluation: evaluateSelection(articles, profile),
+      activity: {
+        startedAt: String(
+          this.db
+            .prepare(
+              "SELECT value FROM settings WHERE key='activity_started_at'",
+            )
+            .get()!.value,
+        ),
+        lastReviewedAt:
+          (this.db
+            .prepare(
+              "SELECT value FROM settings WHERE key='activity_last_reviewed_at'",
+            )
+            .get()?.value as string | undefined) ?? null,
+        newCount: articles.filter((article) => article.changeKind === "new")
+          .length,
+        updatedCount: articles.filter(
+          (article) => article.changeKind === "updated",
+        ).length,
+      },
       lastCollectionAt:
         sources
           .map((s) => s.lastCheckedAt)

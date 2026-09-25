@@ -7,6 +7,7 @@ import { getStore } from "@/lib/store";
 import { parseProfile } from "@/lib/profile";
 import { parseActivityBatch } from "@/lib/activity";
 import { parseFolderName } from "@/lib/folders";
+import { parseCollectionSchedule } from "@/lib/collection-state";
 import type { Feedback } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -56,6 +57,20 @@ export async function POST(request: NextRequest) {
     const store = getStore();
     let message: string | undefined;
     switch (body.action) {
+      case "updateCollectionSchedule": {
+        const schedule = parseCollectionSchedule(
+          body.enabled,
+          body.intervalMinutes,
+        );
+        store.updateCollectionSchedule(
+          schedule.enabled,
+          schedule.intervalMinutes,
+        );
+        message = schedule.enabled
+          ? "Collecte automatique activée tant que le serveur local fonctionne."
+          : "Collecte automatique en pause. Une collecte déjà en cours peut se terminer.";
+        break;
+      }
       case "collect": {
         const result = await collectSources(store);
         message = `${result.added} nouvelle(s) publication(s), ${result.updated} mise(s) à jour. ${result.checked} source(s) consultée(s)${result.failed ? `, ${result.failed} en erreur` : ""}. ${result.skipped ? "Les sources désactivées, sans connecteur ou consultées récemment sont ignorées." : ""}`;

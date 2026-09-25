@@ -55,6 +55,8 @@ import {
   type EvaluationFilter,
 } from "@/lib/selection";
 import { ArticleFolders, FolderManager } from "@/components/folder-controls";
+import { CollectionSchedule } from "@/components/collection-schedule";
+import { useMonitorSnapshot } from "@/components/use-monitor-snapshot";
 
 type View =
   | "personal"
@@ -192,7 +194,8 @@ function splitKeywords(value: string) {
 }
 
 export function Dashboard({ initialData }: { initialData: Snapshot }) {
-  const [data, setData] = useState(initialData);
+  const { data, acceptSnapshot, beginChange, endChange, refresh, syncError } =
+    useMonitorSnapshot(initialData, invalidatePreview);
   const [view, setView] = useState<View>("personal");
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(
     initialData.folders.find((folder) => !folder.archived)?.id ??
@@ -348,8 +351,8 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
     key: string = action.action,
     successMessage?: string,
   ) {
-    if (pending) return false;
-    invalidatePreview();
+    const change = beginChange();
+    if (change === null) return false;
     setPending(key);
     setNotice(null);
     try {
@@ -368,18 +371,19 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
         throw new Error(
           result.error || "L’action n’a pas pu être effectuée. Réessayez.",
         );
-      setData(result.snapshot);
+      acceptSnapshot(result.snapshot);
       if (action.action === "createFolder") {
         if (result.folderId) {
           setSelectedFolderId(result.folderId);
           resetFilters();
         }
       } else if (selectedFolderId === null) {
-        setSelectedFolderId(
+        const fallbackFolderId =
+          selectedFolder?.id ??
           result.snapshot.folders.find((folder) => !folder.archived)?.id ??
-            result.snapshot.folders[0]?.id ??
-            null,
-        );
+          result.snapshot.folders[0]?.id ??
+          null;
+        setSelectedFolderId((current) => current ?? fallbackFolderId);
       }
       if (result.message || successMessage)
         setNotice({ kind: "success", text: result.message || successMessage! });
@@ -395,6 +399,7 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
       return false;
     } finally {
       setPending(null);
+      endChange(change);
     }
   }
 
@@ -413,7 +418,8 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
   }
 
   async function previewProfile() {
-    if (pending) return;
+    const change = beginChange();
+    if (change === null) return;
     const request = ++previewRequest.current;
     setPending("previewProfile");
     setPreview(null);
@@ -447,6 +453,7 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
         });
     } finally {
       setPending(null);
+      endChange(change);
     }
   }
 
@@ -465,6 +472,8 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
   }
 
   function changeView(next: View) {
+    if (next === "folders")
+      setSelectedFolderId((current) => current ?? selectedFolder?.id ?? null);
     setView(next);
     resetFilters();
   }
@@ -613,22 +622,22 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
               <button
                 className="button button-primary"
                 type="button"
-                disabled={busy}
+                disabled={busy || data.collection.running}
                 onClick={() => void mutate({ action: "collect" }, "collect")}
               >
-                {pending === "collect" ? (
+                {pending === "collect" || data.collection.running ? (
                   <LoaderCircle className="spin" size={17} />
                 ) : (
                   <RefreshCw size={17} />
                 )}
-                {pending === "collect"
+                {pending === "collect" || data.collection.running
                   ? "Collecte en cours…"
                   : "Actualiser les sources"}
               </button>
               <span>
                 {data.lastCollectionAt
-                  ? `Dernière collecte : ${dateLabel(data.lastCollectionAt, true)}`
-                  : "Aucune collecte effectuée"}
+                  ? `Dernière consultation : ${dateLabel(data.lastCollectionAt, true)}`
+                  : "Aucune source consultée"}
               </span>
             </div>
           </section>
@@ -651,6 +660,20 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                 aria-label="Fermer le message"
               >
                 <X size={17} />
+              </button>
+            </div>
+          )}
+
+          {syncError && (
+            <div className="snapshot-sync-error" role="status">
+              <CircleAlert size={16} />
+              <span>{syncError}</span>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void refresh()}
+              >
+                Réessayer
               </button>
             </div>
           )}
@@ -1080,7 +1103,7 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                       ) : (
                         <button
                           className="button button-secondary"
-                          disabled={busy}
+                          disabled={busy || data.collection.running}
                           onClick={() =>
                             void mutate({ action: "collect" }, "collect")
                           }
@@ -1100,265 +1123,274 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
           )}
 
           {view === "sources" && (
-            <div className="sources-layout">
-              <section aria-labelledby="sources-title">
-                <div className="section-heading">
-                  <div className="section-title">
-                    <h2 id="sources-title">Sources suivies</h2>
-                    <span className="count-badge">{data.sources.length}</span>
+            <>
+              <CollectionSchedule
+                collection={data.collection}
+                busy={busy}
+                onAction={(action) => void mutate(action)}
+              />
+              <div className="sources-layout">
+                <section aria-labelledby="sources-title">
+                  <div className="section-heading">
+                    <div className="section-title">
+                      <h2 id="sources-title">Sources suivies</h2>
+                      <span className="count-badge">{data.sources.length}</span>
+                    </div>
                   </div>
-                </div>
-                <div className="source-list">
-                  {data.sources.map((source) => (
-                    <article className="source-card" key={source.id}>
-                      <div className="source-card-top">
-                        <span className="source-icon">
-                          {source.collectionKind === "website" ? (
-                            <Globe2 size={20} />
-                          ) : (
-                            <Rss size={20} />
-                          )}
-                        </span>
-                        <div className="source-title">
-                          <h3>{source.name}</h3>
+                  <div className="source-list">
+                    {data.sources.map((source) => (
+                      <article className="source-card" key={source.id}>
+                        <div className="source-card-top">
+                          <span className="source-icon">
+                            {source.collectionKind === "website" ? (
+                              <Globe2 size={20} />
+                            ) : (
+                              <Rss size={20} />
+                            )}
+                          </span>
+                          <div className="source-title">
+                            <h3>{source.name}</h3>
+                            <a
+                              href={source.siteUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              Consulter le site <ArrowUpRight size={12} />
+                            </a>
+                          </div>
+                          <div className="source-controls">
+                            <button
+                              type="button"
+                              className="source-edit"
+                              disabled={busy}
+                              aria-label={`Modifier ${source.name}`}
+                              aria-pressed={editingSourceId === source.id}
+                              onClick={() => editSource(source)}
+                            >
+                              <Pencil size={13} /> Modifier
+                            </button>
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={source.enabled}
+                              aria-label={`${source.enabled ? "Désactiver" : "Activer"} ${source.name}`}
+                              className={`switch ${source.enabled ? "switch-on" : ""}`}
+                              disabled={busy}
+                              onClick={() =>
+                                void mutate(
+                                  {
+                                    action: "toggleSource",
+                                    id: source.id,
+                                    enabled: !source.enabled,
+                                  },
+                                  `source-${source.id}`,
+                                )
+                              }
+                            >
+                              <span />
+                            </button>
+                          </div>
+                        </div>
+                        <div className="source-details">
+                          <span className="source-kind">
+                            {source.collectionKind === "rss"
+                              ? "RSS/Atom"
+                              : source.collectionKind === "website"
+                                ? "Page publique"
+                                : "Connecteur indisponible"}
+                          </span>
+                          <span
+                            className={`source-status status-${source.status}`}
+                          >
+                            <span />
+                            {statusLabels[source.status]}
+                          </span>
+                          <span>{languageLabel(source.language)}</span>
+                          <span>
+                            {source.articleCount} publication
+                            {source.articleCount > 1 ? "s" : ""}
+                          </span>
+                          <span className="source-enabled">
+                            {source.enabled ? "Active" : "Désactivée"}
+                          </span>
+                        </div>
+                        {source.lastError && (
+                          <p className="source-error">
+                            <CircleAlert size={15} />
+                            <span>{source.lastError}</span>
+                          </p>
+                        )}
+                        <dl className="source-dates">
+                          <div>
+                            <dt>Dernière tentative</dt>
+                            <dd>
+                              {source.lastCheckedAt
+                                ? dateLabel(source.lastCheckedAt, true)
+                                : "Pas encore collectée"}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Dernier succès</dt>
+                            <dd>
+                              {source.lastSuccessAt
+                                ? dateLabel(source.lastSuccessAt, true)
+                                : "Aucun"}
+                            </dd>
+                          </div>
+                        </dl>
+                        {source.collectionUrl && (
                           <a
-                            href={source.siteUrl}
+                            className="feed-url"
+                            href={source.collectionUrl}
                             target="_blank"
                             rel="noreferrer"
                           >
-                            Consulter le site <ArrowUpRight size={12} />
+                            {source.collectionKind === "website" ? (
+                              <Globe2 size={12} />
+                            ) : (
+                              <Rss size={12} />
+                            )}
+                            <span>{source.collectionUrl}</span>
+                            <ExternalLink size={12} />
                           </a>
-                        </div>
-                        <div className="source-controls">
-                          <button
-                            type="button"
-                            className="source-edit"
-                            disabled={busy}
-                            aria-label={`Modifier ${source.name}`}
-                            aria-pressed={editingSourceId === source.id}
-                            onClick={() => editSource(source)}
-                          >
-                            <Pencil size={13} /> Modifier
-                          </button>
-                          <button
-                            type="button"
-                            role="switch"
-                            aria-checked={source.enabled}
-                            aria-label={`${source.enabled ? "Désactiver" : "Activer"} ${source.name}`}
-                            className={`switch ${source.enabled ? "switch-on" : ""}`}
-                            disabled={busy}
-                            onClick={() =>
-                              void mutate(
-                                {
-                                  action: "toggleSource",
-                                  id: source.id,
-                                  enabled: !source.enabled,
-                                },
-                                `source-${source.id}`,
-                              )
-                            }
-                          >
-                            <span />
-                          </button>
-                        </div>
-                      </div>
-                      <div className="source-details">
-                        <span className="source-kind">
-                          {source.collectionKind === "rss"
-                            ? "RSS/Atom"
-                            : source.collectionKind === "website"
-                              ? "Page publique"
-                              : "Connecteur indisponible"}
-                        </span>
-                        <span
-                          className={`source-status status-${source.status}`}
-                        >
-                          <span />
-                          {statusLabels[source.status]}
-                        </span>
-                        <span>{languageLabel(source.language)}</span>
-                        <span>
-                          {source.articleCount} publication
-                          {source.articleCount > 1 ? "s" : ""}
-                        </span>
-                        <span className="source-enabled">
-                          {source.enabled ? "Active" : "Désactivée"}
-                        </span>
-                      </div>
-                      {source.lastError && (
-                        <p className="source-error">
-                          <CircleAlert size={15} />
-                          <span>{source.lastError}</span>
+                        )}
+                      </article>
+                    ))}
+                    {data.sources.length === 0 && (
+                      <div className="empty-state">
+                        <Rss size={28} />
+                        <h3>Ajoutez votre première source.</h3>
+                        <p>
+                          Renseignez son site. Pour Brave1 et Defender Media, la
+                          page publique est reconnue automatiquement. Un flux
+                          RSS/Atom peut être fourni pour les autres sources.
                         </p>
-                      )}
-                      <dl className="source-dates">
-                        <div>
-                          <dt>Dernière tentative</dt>
-                          <dd>
-                            {source.lastCheckedAt
-                              ? dateLabel(source.lastCheckedAt, true)
-                              : "Pas encore collectée"}
-                          </dd>
-                        </div>
-                        <div>
-                          <dt>Dernier succès</dt>
-                          <dd>
-                            {source.lastSuccessAt
-                              ? dateLabel(source.lastSuccessAt, true)
-                              : "Aucun"}
-                          </dd>
-                        </div>
-                      </dl>
-                      {source.collectionUrl && (
-                        <a
-                          className="feed-url"
-                          href={source.collectionUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          {source.collectionKind === "website" ? (
-                            <Globe2 size={12} />
-                          ) : (
-                            <Rss size={12} />
-                          )}
-                          <span>{source.collectionUrl}</span>
-                          <ExternalLink size={12} />
-                        </a>
-                      )}
-                    </article>
-                  ))}
-                  {data.sources.length === 0 && (
-                    <div className="empty-state">
-                      <Rss size={28} />
-                      <h3>Ajoutez votre première source.</h3>
-                      <p>
-                        Renseignez son site. Pour Brave1 et Defender Media, la
-                        page publique est reconnue automatiquement. Un flux
-                        RSS/Atom peut être fourni pour les autres sources.
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </section>
-              <section
-                className="panel source-form-panel"
-                aria-labelledby="add-source-title"
-              >
-                <div className="panel-heading">
-                  <span className="panel-icon">
-                    <Rss size={19} />
-                  </span>
-                  <h2 id="add-source-title">
+                      </div>
+                    )}
+                  </div>
+                </section>
+                <section
+                  className="panel source-form-panel"
+                  aria-labelledby="add-source-title"
+                >
+                  <div className="panel-heading">
+                    <span className="panel-icon">
+                      <Rss size={19} />
+                    </span>
+                    <h2 id="add-source-title">
+                      {editingSourceId
+                        ? "Modifier la source"
+                        : "Ajouter une source"}
+                    </h2>
+                  </div>
+                  <p className="muted">
                     {editingSourceId
-                      ? "Modifier la source"
-                      : "Ajouter une source"}
-                  </h2>
-                </div>
-                <p className="muted">
-                  {editingSourceId
-                    ? "Mettez à jour ses paramètres. Son état d’activation est conservé."
-                    : "Ajoutez un site ou un flux à votre veille."}
-                </p>
-                <form onSubmit={addSource} className="stacked-form">
-                  <label htmlFor="source-name">
-                    Nom de la source <span className="required-mark">*</span>
-                  </label>
-                  <input
-                    id="source-name"
-                    ref={sourceNameInput}
-                    value={sourceName}
-                    onChange={(event) => setSourceName(event.target.value)}
-                    placeholder="Nom de la publication"
-                    required
-                    maxLength={120}
-                  />
-                  <label htmlFor="source-site">
-                    Site web <span className="required-mark">*</span>
-                  </label>
-                  <input
-                    id="source-site"
-                    type="url"
-                    value={siteUrl}
-                    readOnly={editingSourceId !== null}
-                    aria-describedby={
-                      editingSourceId ? "source-site-help" : undefined
-                    }
-                    onChange={(event) => setSiteUrl(event.target.value)}
-                    placeholder="https://…"
-                    required
-                  />
-                  {editingSourceId && (
-                    <p id="source-site-help" className="field-help">
-                      L’adresse du site identifie cette source et ne peut pas
-                      être modifiée ici.
-                    </p>
-                  )}
-                  <label htmlFor="source-feed">
-                    Flux RSS/Atom{" "}
-                    <span className="optional-label">facultatif</span>
-                  </label>
-                  <input
-                    id="source-feed"
-                    type="url"
-                    value={feedUrl}
-                    onChange={(event) => setFeedUrl(event.target.value)}
-                    placeholder="https://…/feed"
-                  />
-                  <p className="field-help">
-                    Sans flux, Brave1 et Defender Media utilisent leur page
-                    anglaise de publications. Pour les autres sites, une
-                    détection de flux RSS/Atom sera tentée.
+                      ? "Mettez à jour ses paramètres. Son état d’activation est conservé."
+                      : "Ajoutez un site ou un flux à votre veille."}
                   </p>
-                  <label htmlFor="source-language">
-                    Langue <span className="optional-label">facultatif</span>
-                  </label>
-                  <select
-                    id="source-language"
-                    value={sourceLanguage}
-                    onChange={(event) => setSourceLanguage(event.target.value)}
-                  >
-                    <option value="">Non précisée</option>
-                    <option value="fr">Français</option>
-                    <option value="en">Anglais</option>
-                    <option value="uk">Ukrainien</option>
-                    <option value="de">Allemand</option>
-                    <option value="es">Espagnol</option>
-                    {sourceLanguage &&
-                      !["fr", "en", "uk", "de", "es"].includes(
-                        sourceLanguage,
-                      ) && (
-                        <option value={sourceLanguage}>
-                          {languageLabel(sourceLanguage)}
-                        </option>
-                      )}
-                  </select>
-                  <button
-                    type="submit"
-                    className="button button-primary"
-                    disabled={busy}
-                  >
-                    {pending === "addSource" ? (
-                      <LoaderCircle className="spin" size={16} />
-                    ) : (
-                      <ArrowRight size={16} />
-                    )}{" "}
-                    {editingSourceId
-                      ? "Enregistrer les modifications"
-                      : "Ajouter à ma veille"}
-                  </button>
-                  {editingSourceId && (
-                    <button
-                      type="button"
-                      className="button button-secondary"
-                      disabled={busy}
-                      onClick={resetSourceForm}
+                  <form onSubmit={addSource} className="stacked-form">
+                    <label htmlFor="source-name">
+                      Nom de la source <span className="required-mark">*</span>
+                    </label>
+                    <input
+                      id="source-name"
+                      ref={sourceNameInput}
+                      value={sourceName}
+                      onChange={(event) => setSourceName(event.target.value)}
+                      placeholder="Nom de la publication"
+                      required
+                      maxLength={120}
+                    />
+                    <label htmlFor="source-site">
+                      Site web <span className="required-mark">*</span>
+                    </label>
+                    <input
+                      id="source-site"
+                      type="url"
+                      value={siteUrl}
+                      readOnly={editingSourceId !== null}
+                      aria-describedby={
+                        editingSourceId ? "source-site-help" : undefined
+                      }
+                      onChange={(event) => setSiteUrl(event.target.value)}
+                      placeholder="https://…"
+                      required
+                    />
+                    {editingSourceId && (
+                      <p id="source-site-help" className="field-help">
+                        L’adresse du site identifie cette source et ne peut pas
+                        être modifiée ici.
+                      </p>
+                    )}
+                    <label htmlFor="source-feed">
+                      Flux RSS/Atom{" "}
+                      <span className="optional-label">facultatif</span>
+                    </label>
+                    <input
+                      id="source-feed"
+                      type="url"
+                      value={feedUrl}
+                      onChange={(event) => setFeedUrl(event.target.value)}
+                      placeholder="https://…/feed"
+                    />
+                    <p className="field-help">
+                      Sans flux, Brave1 et Defender Media utilisent leur page
+                      anglaise de publications. Pour les autres sites, une
+                      détection de flux RSS/Atom sera tentée.
+                    </p>
+                    <label htmlFor="source-language">
+                      Langue <span className="optional-label">facultatif</span>
+                    </label>
+                    <select
+                      id="source-language"
+                      value={sourceLanguage}
+                      onChange={(event) =>
+                        setSourceLanguage(event.target.value)
+                      }
                     >
-                      Annuler
+                      <option value="">Non précisée</option>
+                      <option value="fr">Français</option>
+                      <option value="en">Anglais</option>
+                      <option value="uk">Ukrainien</option>
+                      <option value="de">Allemand</option>
+                      <option value="es">Espagnol</option>
+                      {sourceLanguage &&
+                        !["fr", "en", "uk", "de", "es"].includes(
+                          sourceLanguage,
+                        ) && (
+                          <option value={sourceLanguage}>
+                            {languageLabel(sourceLanguage)}
+                          </option>
+                        )}
+                    </select>
+                    <button
+                      type="submit"
+                      className="button button-primary"
+                      disabled={busy}
+                    >
+                      {pending === "addSource" ? (
+                        <LoaderCircle className="spin" size={16} />
+                      ) : (
+                        <ArrowRight size={16} />
+                      )}{" "}
+                      {editingSourceId
+                        ? "Enregistrer les modifications"
+                        : "Ajouter à ma veille"}
                     </button>
-                  )}
-                </form>
-              </section>
-            </div>
+                    {editingSourceId && (
+                      <button
+                        type="button"
+                        className="button button-secondary"
+                        disabled={busy}
+                        onClick={resetSourceForm}
+                      >
+                        Annuler
+                      </button>
+                    )}
+                  </form>
+                </section>
+              </div>
+            </>
           )}
 
           {view === "profile" && (
@@ -1637,7 +1669,12 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
 
           <footer className="page-footer">
             <span>DEFENSE TECH MONITOR</span>
-            <span>Publications originales · Collecte à la demande</span>
+            <span>
+              Publications originales ·{" "}
+              {data.collection.enabled
+                ? "Collecte automatique locale"
+                : "Collecte à la demande"}
+            </span>
           </footer>
         </main>
       </div>

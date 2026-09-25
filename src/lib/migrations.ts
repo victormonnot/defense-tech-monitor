@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-const CURRENT_VERSION = 5;
+const CURRENT_VERSION = 6;
 
 export function migrate(db: DatabaseSync) {
   db.exec("BEGIN IMMEDIATE");
@@ -81,6 +81,25 @@ export function migrate(db: DatabaseSync) {
         );
         CREATE INDEX article_folders_folder ON article_folders(folder_id, article_id);
         PRAGMA user_version = 5;
+      `);
+    }
+    if (version < 6) {
+      db.exec(`
+        CREATE TABLE collection_schedule (
+          id INTEGER PRIMARY KEY CHECK(id=1),
+          enabled INTEGER NOT NULL DEFAULT 0 CHECK(enabled IN (0,1)),
+          interval_minutes INTEGER NOT NULL DEFAULT 60 CHECK(interval_minutes BETWEEN 15 AND 1440),
+          next_run_at TEXT
+        );
+        INSERT INTO collection_schedule (id) VALUES (1);
+        CREATE TABLE collection_run (
+          id INTEGER PRIMARY KEY CHECK(id=1), run_id TEXT NOT NULL UNIQUE,
+          trigger TEXT NOT NULL CHECK(trigger IN ('manual','scheduled','cli')),
+          started_at TEXT NOT NULL, finished_at TEXT,
+          status TEXT NOT NULL CHECK(status IN ('running','success','partial','failed','interrupted')),
+          result TEXT, error TEXT
+        );
+        PRAGMA user_version = 6;
       `);
     }
     db.exec("COMMIT");

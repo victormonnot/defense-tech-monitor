@@ -18,7 +18,12 @@ function removeActivitySchema(db: DatabaseSync) {
 }
 
 function removeFolderSchema(db: DatabaseSync) {
+  removeCollectionSchema(db);
   db.exec("DROP TABLE article_folders; DROP TABLE folders;");
+}
+
+function removeCollectionSchema(db: DatabaseSync) {
+  db.exec("DROP TABLE collection_run; DROP TABLE collection_schedule;");
 }
 
 test("version 1 upgrades preserve publications, personal state, profile and source choices", (t) => {
@@ -77,7 +82,7 @@ test("version 1 upgrades preserve publications, personal state, profile and sour
   const upgraded = new MonitorStore(path);
   assert.equal(
     upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
-    5,
+    6,
   );
   assert.deepEqual(upgraded.snapshot().articles, before);
   assert.equal(upgraded.snapshot().activity.newCount, 0);
@@ -108,7 +113,7 @@ test("fresh migrations are idempotent and reject newer schemas without downgradi
   try {
     migrate(db);
     migrate(db);
-    assert.equal(db.prepare("PRAGMA user_version").get()?.user_version, 5);
+    assert.equal(db.prepare("PRAGMA user_version").get()?.user_version, 6);
     const startedAt = db
       .prepare("SELECT value FROM settings WHERE key='activity_started_at'")
       .get()?.value;
@@ -170,7 +175,7 @@ test("version 2 upgrades add reversible grouping preferences without changing ex
   try {
     assert.equal(
       upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
-      5,
+      6,
     );
     const after = upgraded.snapshot();
     assert.deepEqual(
@@ -239,7 +244,7 @@ test("version 3 upgrades baseline existing articles without changing personal or
     const after = upgraded.snapshot();
     assert.equal(
       upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
-      5,
+      6,
     );
     assert.deepEqual(
       { ...after, activity: undefined },
@@ -307,12 +312,66 @@ test("version 4 upgrades preserve publications, activity and preferences without
   try {
     assert.equal(
       upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
-      5,
+      6,
     );
     assert.deepEqual(upgraded.snapshot(), before);
     assert.deepEqual(upgraded.snapshot().folders, []);
     assert.deepEqual(upgraded.snapshot().articles[0].folderIds, []);
     assert.equal(upgraded.snapshot().articles[0].changeKind, "updated");
+    migrate(upgraded.db);
+    assert.deepEqual(upgraded.snapshot(), before);
+  } finally {
+    upgraded.db.close();
+  }
+});
+
+test("version 5 upgrades add a paused schedule without changing articles, dossiers or activity", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "dtm-migration-v5-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const path = join(directory, "monitor.sqlite");
+  const old = new MonitorStore(path);
+  old.upsertEntries(
+    "brave1",
+    [
+      {
+        guid: "synthetic-v5",
+        url: "https://example.test/v5",
+        title: "Synthetic drone publication",
+        publishedAt: null,
+        text: "Synthetic excerpt",
+        excerpt: "Synthetic excerpt",
+        language: "en",
+        format: "article",
+        contentHash: "v5-hash",
+      },
+    ],
+    "2026-09-25T12:00:00.000Z",
+  );
+  const article = old.snapshot().articles[0];
+  old.setArticleState(article.id, "saved", true);
+  old.setArticleState(article.id, "feedback", "off_topic");
+  old.acknowledgeChanges([article]);
+  const folder = old.createFolder("Synthetic dossier");
+  old.setArticleFolder(article.id, folder, true);
+  old.setFolderArchived(folder, true);
+  const before = old.snapshot();
+  removeCollectionSchema(old.db);
+  old.db.exec("PRAGMA user_version=5");
+  old.db.close();
+  const upgraded = new MonitorStore(path);
+  try {
+    assert.equal(
+      upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
+      6,
+    );
+    assert.deepEqual(upgraded.snapshot(), before);
+    assert.deepEqual(upgraded.snapshot().collection, {
+      enabled: false,
+      intervalMinutes: 60,
+      nextRunAt: null,
+      running: false,
+      lastRun: null,
+    });
     migrate(upgraded.db);
     assert.deepEqual(upgraded.snapshot(), before);
   } finally {

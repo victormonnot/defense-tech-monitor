@@ -12,6 +12,7 @@ import { evaluateSelection, matchesProfile } from "./selection";
 import { classificationText } from "./profile";
 import { MAX_ACTIVITY_BATCH } from "./activity";
 import { parseFolderName } from "./folders";
+import { collectionState, updateCollectionSchedule } from "./collection-state";
 import type {
   ActivityReview,
   Article,
@@ -209,6 +210,14 @@ export class MonitorStore {
       .run(typeof value === "boolean" ? Number(value) : value, id);
   }
 
+  updateCollectionSchedule(enabled: boolean, intervalMinutes: number) {
+    updateCollectionSchedule(this.db, enabled, intervalMinutes);
+  }
+
+  collectionState() {
+    return collectionState(this.db);
+  }
+
   createFolder(value: string): string {
     const { name, key } = parseFolderName(value);
     if (this.db.prepare("SELECT id FROM folders WHERE name_key=?").get(key))
@@ -354,11 +363,17 @@ export class MonitorStore {
     return advanced;
   }
 
-  upsertEntries(sourceId: string, entries: FeedEntry[], collectedAt: string) {
+  upsertEntries(
+    sourceId: string,
+    entries: FeedEntry[],
+    collectedAt: string,
+    beforeWrite?: () => void,
+  ) {
     let added = 0;
     let updated = 0;
     this.db.exec("BEGIN IMMEDIATE");
     try {
+      beforeWrite?.();
       for (const entry of entries) {
         const existing = this.db
           .prepare(
@@ -569,6 +584,7 @@ export class MonitorStore {
         saved: articles.filter((a) => a.saved).length,
       },
       evaluation: evaluateSelection(articles, profile),
+      collection: this.collectionState(),
       activity: {
         startedAt: String(
           this.db

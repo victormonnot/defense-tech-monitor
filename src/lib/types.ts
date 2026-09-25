@@ -82,6 +82,32 @@ export interface ProfilePreview {
   exited: Article[];
 }
 
+export interface CollectionResult {
+  added: number;
+  updated: number;
+  failed: number;
+  skipped: number;
+  checked: number;
+}
+
+export interface CollectionRun {
+  id: string;
+  trigger: "manual" | "scheduled" | "cli";
+  startedAt: string;
+  finishedAt: string | null;
+  status: "running" | "success" | "partial" | "failed" | "interrupted";
+  result: CollectionResult | null;
+  error: string | null;
+}
+
+export interface CollectionState {
+  enabled: boolean;
+  intervalMinutes: number;
+  nextRunAt: string | null;
+  running: boolean;
+  lastRun: CollectionRun | null;
+}
+
 export interface Snapshot {
   articles: Article[];
   sources: Source[];
@@ -90,6 +116,7 @@ export interface Snapshot {
   stories: { groups: StoryGroup[]; related: StoryRelation[] };
   stats: { total: number; selected: number; unread: number; saved: number };
   evaluation: Evaluation;
+  collection: CollectionState;
   activity: {
     startedAt: string;
     lastReviewedAt: string | null;
@@ -106,6 +133,11 @@ export interface ActivityReview {
 
 export type MonitorAction =
   | { action: "collect" }
+  | {
+      action: "updateCollectionSchedule";
+      enabled: boolean;
+      intervalMinutes: number;
+    }
   | {
       action: "addSource";
       name: string;

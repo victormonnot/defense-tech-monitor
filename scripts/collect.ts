@@ -4,7 +4,9 @@ import { getStore } from "../src/lib/store";
 async function main() {
   const store = getStore();
   try {
-    const result = await collectSources(store);
+    const result = await collectSources(store, undefined, undefined, {
+      trigger: "cli",
+    });
     console.log(
       JSON.stringify(
         {

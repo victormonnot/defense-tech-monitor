@@ -33,6 +33,7 @@ The application is intended for local, single-user use. The server binds to the 
 The interface currently uses French labels:
 
 - **For me — Pour moi**: publications matching your profile, plus those explicitly marked relevant. Items marked off-topic or already seen are excluded.
+- **Review — Revue**: a compact, themed edition of publications first collected or updated within the last 24 hours or 7 days, with a Markdown download.
 - **Full feed — Tout le flux**: all collected publications, with search and filters for source, topic, language, and format.
 - **Saved — Sauvegardés**: bookmarked publications, preserved across restarts.
 - **Folders — Dossiers**: organize publications into named folders and browse their contents with the usual feed filters.
@@ -41,6 +42,20 @@ The interface currently uses French labels:
 - **Monitoring profile — Profil de veille**: keywords, exclusions, the minimum number of matches required, and the content used for selection. An exclusion keyword rejects an article under the rules; explicitly marking it relevant overrides that decision for your personal feed.
 
 Start collection with **Refresh sources — Actualiser les sources** or `npm run collect`. You can also enable automatic collection under **Sources**.
+
+### Monitoring reviews
+
+Open **Review — Revue** to create a compact edition from the current collected data. Choose the last 24 hours or 7 days, and either **For me — Pour moi** or **Full feed — Tout le flux**. For me applies your saved profile and explicit relevance feedback. The period uses collection timestamps: an older article first imported during the period is a new collection; an article imported earlier qualifies when its collected data was updated during the period. Reading, saving, or acknowledging an article does not remove it from this review.
+
+The edition stays fixed while you read it. Background collection can show an update notice, but only **Refresh review — Actualiser la revue**, a period/scope change, or reopening the view creates a new edition. **Refresh sources — Actualiser les sources** runs collection separately. The displayed timestamps include the exact window and edition time.
+
+Publications are organized by one primary topic to avoid duplicate counts. Existing announcement groups apply only to included publications, and every included member keeps its own original title, link, publication date, language, and available excerpt. Detection and publication dates remain separate. Metadata-only items have no excerpt. These are original source excerpts, not generated French summaries or verified claims.
+
+Each edition includes at most the 100 publications most recently first collected or updated in the selected window. A notice shows how many were omitted; all summary counts describe the included publications. Grouping follows this limit and the selected scope, so an excluded publication never returns through a group. Source coverage notices concern all active sources, including errors, unsupported sources, and sources not checked within the period.
+
+**Download Markdown — Télécharger Markdown** exports the exact displayed edition, including original links, provenance, coverage notices, and any omissions. External text is escaped as literal Markdown, and links are limited to HTTP(S) URLs without credentials. The file is downloaded locally; no account or external service is required. Viewing, refreshing, and exporting a review do not change read states, bookmarks, feedback, folders, or change acknowledgements.
+
+Reviews use the latest collected version available when created. They do not reconstruct earlier revisions or describe the precise differences between versions, and editions are not stored in the database. Keep the downloaded file if you want to retain an edition.
 
 ### Automatic collection
 
@@ -144,6 +159,8 @@ src/lib/classifier.ts             Replaceable classification and explicit rules
 src/lib/profile.ts                Profile validation and selection text scope
 src/lib/selection.ts              Personal corrections and evaluation of raw rule decisions
 src/lib/activity.ts               Change filters and bounded revision acknowledgements
+src/lib/digest.ts                 Time windows, themed editions, and coverage notices
+src/lib/digest-markdown.ts        Safe Markdown export of a captured edition
 src/lib/folders.ts                Folder name validation and normalization
 src/lib/stories.ts                Conservative announcement grouping and comparison hints
 src/lib/story-feed.ts             Group presentation after view and search filters

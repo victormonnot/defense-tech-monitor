@@ -17,6 +17,7 @@ import {
   Layers3,
   ListFilter,
   LoaderCircle,
+  Newspaper,
   Pencil,
   Radio,
   RefreshCw,
@@ -57,10 +58,12 @@ import {
 import { ArticleFolders, FolderManager } from "@/components/folder-controls";
 import { CollectionSchedule } from "@/components/collection-schedule";
 import { useMonitorSnapshot } from "@/components/use-monitor-snapshot";
+import { DigestView } from "@/components/digest-view";
 
 type View =
   | "personal"
   | "all"
+  | "digest"
   | "saved"
   | "folders"
   | "evaluation"
@@ -72,6 +75,7 @@ type RelatedPublication = { article: Article; reason: string };
 const views = [
   { id: "personal", label: "Pour moi", icon: Compass },
   { id: "all", label: "Tout le flux", icon: Radio },
+  { id: "digest", label: "Revue", icon: Newspaper },
   { id: "saved", label: "Sauvegardés", icon: Bookmark },
   { id: "folders", label: "Dossiers", icon: FolderOpen },
   { id: "evaluation", label: "Évaluer", icon: CheckCheck },
@@ -100,6 +104,11 @@ const viewCopy: Record<
     title: "Sauvegardés",
     description:
       "Vos publications sauvegardées, pour y revenir quand vous en avez besoin.",
+  },
+  digest: {
+    eyebrow: "VOTRE POINT DE VEILLE",
+    title: "Revue de veille",
+    description: "Titres et extraits disponibles, organisés par thème.",
   },
   folders: {
     eyebrow: "VOTRE BIBLIOTHÈQUE",
@@ -561,7 +570,7 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
             <button
               key={id}
               type="button"
-              className={`nav-item ${view === id ? "active" : ""}`}
+              className={`nav-item ${view === id ? "active" : ""} ${id === "sources" ? "nav-section-start" : ""}`}
               onClick={() => changeView(id)}
               aria-current={view === id ? "page" : undefined}
             >
@@ -678,29 +687,38 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
             </div>
           )}
 
-          <div className="stats-grid" aria-label="Vue d’ensemble">
-            <Stat
-              label="Publications collectées"
-              value={data.articles.length}
-              icon={<Radio size={18} />}
+          {view !== "digest" && (
+            <div className="stats-grid" aria-label="Vue d’ensemble">
+              <Stat
+                label="Publications collectées"
+                value={data.articles.length}
+                icon={<Radio size={18} />}
+              />
+              <Stat
+                label="Dans votre sélection"
+                value={selected.length}
+                icon={<Compass size={18} />}
+                highlight
+              />
+              <Stat
+                label="À lire dans la sélection"
+                value={selected.filter((article) => !article.isRead).length}
+                icon={<Eye size={18} />}
+              />
+              <Stat
+                label="Publications sauvegardées"
+                value={saved.length}
+                icon={<Bookmark size={18} />}
+              />
+            </div>
+          )}
+
+          {view === "digest" && (
+            <DigestView
+              snapshot={data}
+              onOpenSources={() => changeView("sources")}
             />
-            <Stat
-              label="Dans votre sélection"
-              value={selected.length}
-              icon={<Compass size={18} />}
-              highlight
-            />
-            <Stat
-              label="À lire dans la sélection"
-              value={selected.filter((article) => !article.isRead).length}
-              icon={<Eye size={18} />}
-            />
-            <Stat
-              label="Publications sauvegardées"
-              value={saved.length}
-              icon={<Bookmark size={18} />}
-            />
-          </div>
+          )}
 
           {view === "folders" && (
             <FolderManager

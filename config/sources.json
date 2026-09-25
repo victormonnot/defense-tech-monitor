@@ -1,0 +1,30 @@
+[
+  {
+    "id": "ukraines-arms-monitor",
+    "name": "Ukraine’s Arms Monitor",
+    "siteUrl": "https://ukrainesarmsmonitor.substack.com/",
+    "feedUrl": "https://ukrainesarmsmonitor.substack.com/feed",
+    "language": "en"
+  },
+  {
+    "id": "militarnyi",
+    "name": "Militarnyi",
+    "siteUrl": "https://militarnyi.com/en/",
+    "feedUrl": "https://militarnyi.com/en/news/feed/",
+    "language": "en"
+  },
+  {
+    "id": "brave1",
+    "name": "Brave1",
+    "siteUrl": "https://brave1.gov.ua/en",
+    "feedUrl": null,
+    "language": "en"
+  },
+  {
+    "id": "defender-media",
+    "name": "Defender Media",
+    "siteUrl": "https://thedefender.media/en/",
+    "feedUrl": null,
+    "language": "en"
+  }
+]

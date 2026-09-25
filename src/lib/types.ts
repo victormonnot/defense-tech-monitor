@@ -1,11 +1,14 @@
 export type Feedback = "relevant" | "off_topic" | "seen";
 export type SourceStatus = "pending" | "ok" | "empty" | "error" | "unsupported";
+export type ContentBasis = "feed_text" | "page_excerpt" | "metadata";
 
 export interface Source {
   id: string;
   name: string;
   siteUrl: string;
   feedUrl: string | null;
+  collectionKind: "rss" | "website" | "unsupported";
+  collectionUrl: string | null;
   language: string;
   enabled: boolean;
   status: SourceStatus;
@@ -27,7 +30,7 @@ export interface Article {
   format: "article" | "video";
   themes: string[];
   excerpt: string | null;
-  contentBasis: "feed_text" | "metadata";
+  contentBasis: ContentBasis;
   score: number;
   reasons: string[];
   isRead: boolean;

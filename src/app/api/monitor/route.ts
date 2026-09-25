@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { collectSources, discoverSource } from "@/lib/collector";
+import { resolveCollection } from "@/lib/connectors";
 import { canonicalUrl, publicUrl } from "@/lib/feed";
 import { validateRemoteUrl } from "@/lib/network";
 import { getStore } from "@/lib/store";
@@ -60,7 +61,7 @@ export async function POST(request: NextRequest) {
     switch (body.action) {
       case "collect": {
         const result = await collectSources(store);
-        message = `${result.added} nouvelle(s) publication(s), ${result.updated} mise(s) à jour. ${result.checked} source(s) consultée(s)${result.failed ? `, ${result.failed} en erreur` : ""}. ${result.skipped ? "Les sources désactivées, sans flux ou consultées récemment sont ignorées." : ""}`;
+        message = `${result.added} nouvelle(s) publication(s), ${result.updated} mise(s) à jour. ${result.checked} source(s) consultée(s)${result.failed ? `, ${result.failed} en erreur` : ""}. ${result.skipped ? "Les sources désactivées, sans connecteur ou consultées récemment sont ignorées." : ""}`;
         break;
       }
       case "addSource": {
@@ -72,7 +73,9 @@ export async function POST(request: NextRequest) {
         const feedUrl =
           typeof body.feedUrl === "string" && body.feedUrl.trim()
             ? publicUrl(body.feedUrl.trim())
-            : await discoverSource(siteUrl);
+            : resolveCollection(siteUrl, null)
+              ? null
+              : await discoverSource(siteUrl);
         if (feedUrl) validateRemoteUrl(feedUrl);
         const language =
           typeof body.language === "string" &&
@@ -80,7 +83,7 @@ export async function POST(request: NextRequest) {
             ? body.language.split("-")[0]
             : "und";
         store.addSource({ name, siteUrl, feedUrl, language });
-        message = feedUrl
+        message = resolveCollection(siteUrl, feedUrl)
           ? "Source enregistrée. Lancez la collecte pour récupérer ses publications."
           : "Source enregistrée, mais aucun flux RSS/Atom n’a été découvert. Vous pouvez renseigner une URL de flux.";
         break;

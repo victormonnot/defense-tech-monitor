@@ -1,6 +1,7 @@
 import Parser from "rss-parser";
 import { load } from "cheerio";
 import { createHash } from "node:crypto";
+import type { ContentBasis } from "./types";
 
 export interface FeedEntry {
   guid: string;
@@ -12,6 +13,7 @@ export interface FeedEntry {
   language: string;
   format: "article" | "video";
   contentHash: string;
+  contentBasis?: ContentBasis;
 }
 
 export function publicUrl(value: string, base?: string): string {

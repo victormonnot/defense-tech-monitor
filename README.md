@@ -2,7 +2,7 @@
 
 A personal monitoring application for following developments in drones, robotics, and defense technology from sources you choose.
 
-Publications are collected through RSS/Atom, stored locally, and selected using an editable keyword profile. Each publication retains its original title, source, language, and link.
+Publications are collected through RSS/Atom or dedicated public-page connectors, stored locally, and selected using an editable keyword profile. Each publication retains its original title, source, language, and link. The interface distinguishes feed text, public-page excerpts, and titles with metadata only.
 
 ## Getting started
 
@@ -35,7 +35,7 @@ The interface currently uses French labels:
 - **For me — Pour moi**: publications matching your profile, excluding items marked off-topic or already seen.
 - **Full feed — Tout le flux**: all collected publications, with search and filters for source, topic, language, and format.
 - **Saved — Sauvegardés**: bookmarked publications, preserved across restarts.
-- **Sources**: add websites or feeds, enable or disable collection, and inspect collection status and errors.
+- **Sources**: add websites or feeds, edit their configuration, enable or disable collection, and inspect the collection method, address, status, and errors.
 - **Monitoring profile — Profil de veille**: keywords, exclusions, and the minimum number of matches required. A single exclusion keyword removes a publication from the selection without removing it from the full feed.
 
 Start collection with **Refresh sources — Actualiser les sources** or `npm run collect`. Collection is not scheduled automatically. By default, a source checked within the last 15 minutes is skipped. Set `DTM_COLLECTION_INTERVAL_MINUTES` to change this interval; source access restrictions and crawl delays still apply.
@@ -46,27 +46,33 @@ Feedback is saved as relevant, off-topic, or already seen. The profile view repo
 
 The four initial sources are defined in [`config/sources.json`](config/sources.json) and seeded into the database on first launch. Existing database entries are not overwritten by this file. Sources added through the interface remain in the local database.
 
-| Source                                                              | Current collection support                           |
-| ------------------------------------------------------------------- | ---------------------------------------------------- |
-| [Ukraine’s Arms Monitor](https://ukrainesarmsmonitor.substack.com/) | [RSS](https://ukrainesarmsmonitor.substack.com/feed) |
-| [Militarnyi](https://militarnyi.com/en/)                            | [English RSS](https://militarnyi.com/en/news/feed/)  |
-| [Brave1](https://brave1.gov.ua/en)                                  | Source registered; a dedicated connector is required |
-| [Defender Media](https://thedefender.media/en/)                     | Source registered; a dedicated connector is required |
+| Source                                                              | Collection method                                    | Available content                                                                |
+| ------------------------------------------------------------------- | ---------------------------------------------------- | -------------------------------------------------------------------------------- |
+| [Ukraine’s Arms Monitor](https://ukrainesarmsmonitor.substack.com/) | [RSS](https://ukrainesarmsmonitor.substack.com/feed) | Text provided by the feed                                                        |
+| [Militarnyi](https://militarnyi.com/en/)                            | [English RSS](https://militarnyi.com/en/news/feed/)  | Text provided by the feed                                                        |
+| [Brave1](https://brave1.gov.ua/en)                                  | Dedicated connector for its English public listing   | Titles, dates when provided, and original links; no article excerpts             |
+| [Defender Media](https://thedefender.media/en/)                     | Dedicated connector for its English public listing   | Titles, dates when provided, original links, and excerpts from publication cards |
 
-To add a source, enter its name and website under **Sources**. The application looks for an RSS/Atom link explicitly advertised by the page; you can also provide a feed URL directly. Failure to discover a feed does not mean the website has stopped publishing. Entering the same website URL again updates its configuration.
+To add a source, enter its name and website under **Sources**. Brave1 and Defender Media are recognized automatically and do not require a feed URL. For other websites, the application looks for an RSS/Atom link explicitly advertised by the page; you can also provide a feed URL directly. Failure to discover a feed does not mean the website has stopped publishing.
+
+Use **Edit — Modifier** on a source card to update its name, feed URL, or language. Its website address is read-only because it identifies the source. Saving changes preserves its enabled or disabled state. **Cancel — Annuler** clears the form without saving. Entering the same website URL through the add form also updates its configuration.
+
+Each public-page connector reads one English listing page per collection: [Brave1 news](https://brave1.gov.ua/en/news) or [Defender Media](https://thedefender.media/en/). It does not follow pagination, import the full archive, or open individual article pages. The source card links to the page or feed used for collection. Website structure changes can interrupt extraction; check the collection status and any reported errors before assuming that a source has stopped publishing.
 
 Collection respects `robots.txt`, limits response size, applies timeouts, and validates network destinations, including redirects. Failed sources retain previously collected articles and display their errors. Conditional HTTP requests (`ETag`, `Last-Modified`) and content hashes reduce repeated processing.
 
 ## Data and limitations
 
-- Displayed publications come from real feeds. Only tests use synthetic data.
+- Displayed publications come from real feeds and supported public pages. Only tests use synthetic data.
 - Publication and collection timestamps are separate. Unknown publication dates remain unknown.
-- Available feed text is analyzed up to a limit of 20,000 characters. Feed text is not necessarily the complete article. The interface displays excerpts of up to 400 characters; the API does not expose the stored article body.
+- Available feed text is analyzed up to a limit of 20,000 characters and is not necessarily the complete article. Public-page connectors use only the content available in listing cards: Brave1 provides metadata only, while Defender Media also provides card excerpts. The interface identifies the content used for analysis and displays excerpts of up to 400 characters; the API does not expose the stored article body. Metadata-only publications have no excerpt or generated summary.
 - Full articles are not republished. The application does not bypass paywalls, transcribe videos, or invent summaries from titles.
 - Classification uses deterministic keyword rules, with limitations around synonyms and languages. Matches indicate relevance to a profile, never the reliability of a claim.
 - Repeated imports of a publication from the same source are detected through its identifier or normalized URL. **Coverage of the same announcement across different outlets is not yet grouped**, and repeated coverage is not presented as independent confirmation.
 - This version does not include exhaustive archive imports, generated summaries, topic folders, alerts, or audio.
 - The database and `.env` files are excluded from Git. The example configuration contains no secrets. To back up local data, stop the application and copy the `data/` directory.
+
+Existing databases are upgraded automatically to schema version 2 when opened. This migration adds collection and content-provenance metadata while preserving collected publications, read and saved states, feedback, source activation settings, and the keyword profile.
 
 ## Architecture
 
@@ -75,8 +81,10 @@ A [Next.js](https://nextjs.org/docs) monolith with React and TypeScript serves t
 ```text
 src/lib/network.ts     HTTP, allowed destinations, and robots.txt
 src/lib/feed.ts        RSS/Atom discovery and normalization
+src/lib/connectors/    Brave1 and Defender Media public-page extraction
 src/lib/collector.ts   Collection, caching, and error handling
 src/lib/store.ts       SQLite persistence and personal state
+src/lib/migrations.ts  Versioned database upgrades
 src/lib/classifier.ts  Replaceable classification and explicit rules
 src/app/api/monitor/   Local reads and mutations
 src/components/       Monitoring interface

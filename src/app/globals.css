@@ -807,6 +807,40 @@ h2 {
   align-items: center;
   gap: 12px;
 }
+.source-controls {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.source-controls .switch {
+  margin-left: 0;
+}
+.source-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 0;
+  background: transparent;
+  color: #647b9f;
+  font-size: 11px;
+  border-radius: 3px;
+}
+.source-edit:hover:not(:disabled),
+.source-edit[aria-pressed="true"] {
+  color: var(--blue);
+}
+.source-kind {
+  padding: 2px 6px;
+  color: #5d7599;
+  background: #eef3fb;
+  border-radius: 4px;
+}
+.stacked-form input[readonly] {
+  background: #f2f4f7;
+  color: #7e899b;
+}
 .source-icon {
   width: 39px;
   height: 39px;

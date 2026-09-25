@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { discoverFeed, parseFeed } from "./feed";
+import { discoverFeed } from "./feed";
+import { resolveCollection } from "./connectors";
 import { fetchResource, type HttpResult } from "./network";
 import { getStore, type MonitorStore } from "./store";
 
@@ -54,9 +55,10 @@ export async function collectSources(
   };
   try {
     for (const source of store.sources()) {
+      const target = resolveCollection(source.siteUrl, source.feedUrl);
       if (
         !source.enabled ||
-        !source.feedUrl ||
+        !target ||
         (source.lastCheckedAt &&
           Date.now() - Date.parse(source.lastCheckedAt) <
             intervalMinutes * 60000)
@@ -88,7 +90,7 @@ export async function collectSources(
         if (cache.etag) headers["if-none-match"] = cache.etag;
         if (cache.last_modified)
           headers["if-modified-since"] = cache.last_modified;
-        const response = await fetcher(source.feedUrl, headers);
+        const response = await fetcher(target.url, headers);
         if (response.status === 304) {
           store.db
             .prepare(
@@ -105,7 +107,7 @@ export async function collectSources(
         }
         if (response.status !== 200)
           throw new Error(`La source répond HTTP ${response.status}.`);
-        const entries = await parseFeed(
+        const entries = await target.parse(
           response.body,
           response.url,
           source.language,

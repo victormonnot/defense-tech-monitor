@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useMemo, useRef, useState, type FormEvent } from "react";
 import {
   ArrowRight,
   ArrowUpRight,
@@ -12,8 +12,10 @@ import {
   Compass,
   ExternalLink,
   Eye,
+  Globe2,
   ListFilter,
   LoaderCircle,
+  Pencil,
   Radio,
   RefreshCw,
   Rss,
@@ -30,6 +32,7 @@ import type {
   MonitorAction,
   Profile,
   Snapshot,
+  Source,
   SourceStatus,
 } from "@/lib/types";
 
@@ -82,8 +85,8 @@ const viewCopy: Record<
 
 const statusLabels: Record<SourceStatus, string> = {
   pending: "À collecter",
-  ok: "Flux accessible",
-  empty: "Flux vide",
+  ok: "Collecte réussie",
+  empty: "Aucune publication trouvée",
   error: "Erreur de collecte",
   unsupported: "Connecteur à ajouter",
 };
@@ -93,6 +96,7 @@ function dateLabel(value: string | null, withTime = false) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Date non fournie";
   return new Intl.DateTimeFormat("fr-FR", {
+    ...(/^\d{4}-\d{2}-\d{2}$/.test(value) ? { timeZone: "UTC" } : {}),
     day: "numeric",
     month: "short",
     year: "numeric",
@@ -150,6 +154,8 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
   const [siteUrl, setSiteUrl] = useState("");
   const [feedUrl, setFeedUrl] = useState("");
   const [sourceLanguage, setSourceLanguage] = useState("");
+  const [editingSourceId, setEditingSourceId] = useState<string | null>(null);
+  const sourceNameInput = useRef<HTMLInputElement>(null);
 
   const selected = data.articles.filter((article) =>
     matchesProfile(article, data.profile),
@@ -251,6 +257,23 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
     resetFilters();
   }
 
+  function resetSourceForm() {
+    setEditingSourceId(null);
+    setSourceName("");
+    setSiteUrl("");
+    setFeedUrl("");
+    setSourceLanguage("");
+  }
+
+  function editSource(source: Source) {
+    setEditingSourceId(source.id);
+    setSourceName(source.name);
+    setSiteUrl(source.siteUrl);
+    setFeedUrl(source.feedUrl ?? "");
+    setSourceLanguage(source.language === "und" ? "" : source.language);
+    sourceNameInput.current?.focus();
+  }
+
   async function addSource(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const success = await mutate(
@@ -258,17 +281,16 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
         action: "addSource",
         name: sourceName.trim(),
         siteUrl: siteUrl.trim(),
-        ...(feedUrl.trim() ? { feedUrl: feedUrl.trim() } : {}),
+        feedUrl: feedUrl.trim(),
         ...(sourceLanguage ? { language: sourceLanguage } : {}),
       },
       "addSource",
-      "Source ajoutée. Lancez une collecte pour récupérer ses publications.",
+      editingSourceId
+        ? "Source mise à jour. Son état d’activation est conservé."
+        : "Source ajoutée. Lancez une collecte pour récupérer ses publications.",
     );
     if (success) {
-      setSourceName("");
-      setSiteUrl("");
-      setFeedUrl("");
-      setSourceLanguage("");
+      resetSourceForm();
     }
   }
 
@@ -639,7 +661,11 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                     <article className="source-card" key={source.id}>
                       <div className="source-card-top">
                         <span className="source-icon">
-                          <Rss size={20} />
+                          {source.collectionKind === "website" ? (
+                            <Globe2 size={20} />
+                          ) : (
+                            <Rss size={20} />
+                          )}
                         </span>
                         <div className="source-title">
                           <h3>{source.name}</h3>
@@ -651,28 +677,47 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                             Consulter le site <ArrowUpRight size={12} />
                           </a>
                         </div>
-                        <button
-                          type="button"
-                          role="switch"
-                          aria-checked={source.enabled}
-                          aria-label={`${source.enabled ? "Désactiver" : "Activer"} ${source.name}`}
-                          className={`switch ${source.enabled ? "switch-on" : ""}`}
-                          disabled={busy}
-                          onClick={() =>
-                            void mutate(
-                              {
-                                action: "toggleSource",
-                                id: source.id,
-                                enabled: !source.enabled,
-                              },
-                              `source-${source.id}`,
-                            )
-                          }
-                        >
-                          <span />
-                        </button>
+                        <div className="source-controls">
+                          <button
+                            type="button"
+                            className="source-edit"
+                            disabled={busy}
+                            aria-label={`Modifier ${source.name}`}
+                            aria-pressed={editingSourceId === source.id}
+                            onClick={() => editSource(source)}
+                          >
+                            <Pencil size={13} /> Modifier
+                          </button>
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={source.enabled}
+                            aria-label={`${source.enabled ? "Désactiver" : "Activer"} ${source.name}`}
+                            className={`switch ${source.enabled ? "switch-on" : ""}`}
+                            disabled={busy}
+                            onClick={() =>
+                              void mutate(
+                                {
+                                  action: "toggleSource",
+                                  id: source.id,
+                                  enabled: !source.enabled,
+                                },
+                                `source-${source.id}`,
+                              )
+                            }
+                          >
+                            <span />
+                          </button>
+                        </div>
                       </div>
                       <div className="source-details">
+                        <span className="source-kind">
+                          {source.collectionKind === "rss"
+                            ? "RSS/Atom"
+                            : source.collectionKind === "website"
+                              ? "Page publique"
+                              : "Connecteur indisponible"}
+                        </span>
                         <span
                           className={`source-status status-${source.status}`}
                         >
@@ -712,15 +757,19 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                           </dd>
                         </div>
                       </dl>
-                      {source.feedUrl && (
+                      {source.collectionUrl && (
                         <a
                           className="feed-url"
-                          href={source.feedUrl}
+                          href={source.collectionUrl}
                           target="_blank"
                           rel="noreferrer"
                         >
-                          <Rss size={12} />
-                          <span>{source.feedUrl}</span>
+                          {source.collectionKind === "website" ? (
+                            <Globe2 size={12} />
+                          ) : (
+                            <Rss size={12} />
+                          )}
+                          <span>{source.collectionUrl}</span>
                           <ExternalLink size={12} />
                         </a>
                       )}
@@ -731,8 +780,9 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                       <Rss size={28} />
                       <h3>Ajoutez votre première source.</h3>
                       <p>
-                        Renseignez son site et, si vous le connaissez, son flux
-                        RSS.
+                        Renseignez son site. Pour Brave1 et Defender Media, la
+                        page publique est reconnue automatiquement. Un flux
+                        RSS/Atom peut être fourni pour les autres sources.
                       </p>
                     </div>
                   )}
@@ -746,10 +796,16 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                   <span className="panel-icon">
                     <Rss size={19} />
                   </span>
-                  <h2 id="add-source-title">Ajouter une source</h2>
+                  <h2 id="add-source-title">
+                    {editingSourceId
+                      ? "Modifier la source"
+                      : "Ajouter une source"}
+                  </h2>
                 </div>
                 <p className="muted">
-                  Un site à suivre ? Ajoutez-le à votre veille.
+                  {editingSourceId
+                    ? "Mettez à jour ses paramètres. Son état d’activation est conservé."
+                    : "Ajoutez un site ou un flux à votre veille."}
                 </p>
                 <form onSubmit={addSource} className="stacked-form">
                   <label htmlFor="source-name">
@@ -757,6 +813,7 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                   </label>
                   <input
                     id="source-name"
+                    ref={sourceNameInput}
                     value={sourceName}
                     onChange={(event) => setSourceName(event.target.value)}
                     placeholder="Nom de la publication"
@@ -770,12 +827,23 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                     id="source-site"
                     type="url"
                     value={siteUrl}
+                    readOnly={editingSourceId !== null}
+                    aria-describedby={
+                      editingSourceId ? "source-site-help" : undefined
+                    }
                     onChange={(event) => setSiteUrl(event.target.value)}
                     placeholder="https://…"
                     required
                   />
+                  {editingSourceId && (
+                    <p id="source-site-help" className="field-help">
+                      L’adresse du site identifie cette source et ne peut pas
+                      être modifiée ici.
+                    </p>
+                  )}
                   <label htmlFor="source-feed">
-                    Flux RSS <span className="optional-label">facultatif</span>
+                    Flux RSS/Atom{" "}
+                    <span className="optional-label">facultatif</span>
                   </label>
                   <input
                     id="source-feed"
@@ -785,8 +853,9 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                     placeholder="https://…/feed"
                   />
                   <p className="field-help">
-                    Sans URL de flux, une détection sera tentée à partir du
-                    site.
+                    Sans flux, Brave1 et Defender Media utilisent leur page
+                    anglaise de publications. Pour les autres sites, une
+                    détection de flux RSS/Atom sera tentée.
                   </p>
                   <label htmlFor="source-language">
                     Langue <span className="optional-label">facultatif</span>
@@ -799,8 +868,17 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                     <option value="">Non précisée</option>
                     <option value="fr">Français</option>
                     <option value="en">Anglais</option>
+                    <option value="uk">Ukrainien</option>
                     <option value="de">Allemand</option>
                     <option value="es">Espagnol</option>
+                    {sourceLanguage &&
+                      !["fr", "en", "uk", "de", "es"].includes(
+                        sourceLanguage,
+                      ) && (
+                        <option value={sourceLanguage}>
+                          {languageLabel(sourceLanguage)}
+                        </option>
+                      )}
                   </select>
                   <button
                     type="submit"
@@ -812,8 +890,20 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                     ) : (
                       <ArrowRight size={16} />
                     )}{" "}
-                    Ajouter à ma veille
+                    {editingSourceId
+                      ? "Enregistrer les modifications"
+                      : "Ajouter à ma veille"}
                   </button>
+                  {editingSourceId && (
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      disabled={busy}
+                      onClick={resetSourceForm}
+                    >
+                      Annuler
+                    </button>
+                  )}
                 </form>
               </section>
             </div>
@@ -945,11 +1035,12 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                   <h3>Une sélection explicable</h3>
                   <p>
                     Le score compte les mots-clés de votre profil présents dans
-                    le texte disponible du flux. Chaque publication précise si
-                    l’analyse porte sur un extrait ou uniquement sur son titre
-                    et ses métadonnées. Le texte analysé est limité à 20 000
-                    caractères ; il ne correspond pas nécessairement à l’article
-                    intégral.
+                    le texte disponible. Chaque publication précise l’origine
+                    analysée : texte du flux, extrait d’une page publique, ou
+                    titre et métadonnées uniquement. Le texte des flux est
+                    limité à 20 000 caractères. Les connecteurs de pages
+                    publiques consultent une seule page anglaise par source et
+                    par collecte, sans ouvrir le corps des articles.
                   </p>
                   <p>
                     Les publications signalées « Hors sujet » ou « Déjà vu »
@@ -1082,9 +1173,13 @@ function ArticleCard({
             ))}
           </div>
         )}
-        {article.excerpt && (
+        {article.excerpt && article.contentBasis !== "metadata" && (
           <div className="article-excerpt">
-            <span>Extrait du flux</span>
+            <span>
+              {article.contentBasis === "page_excerpt"
+                ? "Extrait de la page"
+                : "Extrait du flux"}
+            </span>
             <p>
               {article.excerpt.length > 400
                 ? `${article.excerpt.slice(0, 397).trimEnd()}…`
@@ -1097,7 +1192,9 @@ function ArticleCard({
             <span className="analysis-dot" />
             {article.contentBasis === "feed_text"
               ? "Texte du flux analysé"
-              : "Titre et métadonnées analysés"}
+              : article.contentBasis === "page_excerpt"
+                ? "Extrait de la page analysé"
+                : "Titre et métadonnées analysés"}
           </span>
           {article.reasons.length > 0 && (
             <details>

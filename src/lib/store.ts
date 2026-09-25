@@ -5,6 +5,8 @@ import { randomUUID } from "node:crypto";
 import seeds from "../../config/sources.json";
 import { defaultProfile, rulesClassifier, type Classifier } from "./classifier";
 import type { FeedEntry } from "./feed";
+import { migrate } from "./migrations";
+import { resolveCollection } from "./connectors";
 import type { Article, Feedback, Profile, Snapshot, Source } from "./types";
 
 type Row = Record<string, string | number | null>;
@@ -24,30 +26,12 @@ export class MonitorStore {
       PRAGMA journal_mode = WAL;
       PRAGMA foreign_keys = ON;
       PRAGMA busy_timeout = 5000;
-      CREATE TABLE IF NOT EXISTS sources (
-        id TEXT PRIMARY KEY, name TEXT NOT NULL, site_url TEXT NOT NULL UNIQUE,
-        feed_url TEXT, language TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1,
-        status TEXT NOT NULL DEFAULT 'pending', last_checked_at TEXT, last_success_at TEXT, last_error TEXT,
-        etag TEXT, last_modified TEXT, last_feed_count INTEGER
-      );
-      CREATE TABLE IF NOT EXISTS articles (
-        id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES sources(id), guid TEXT NOT NULL,
-        url TEXT NOT NULL, title TEXT NOT NULL, published_at TEXT, collected_at TEXT NOT NULL,
-        text TEXT NOT NULL, excerpt TEXT, language TEXT NOT NULL, format TEXT NOT NULL,
-        content_hash TEXT NOT NULL, is_read INTEGER NOT NULL DEFAULT 0, saved INTEGER NOT NULL DEFAULT 0,
-        feedback TEXT CHECK(feedback IN ('relevant', 'off_topic', 'seen')),
-        UNIQUE(source_id, guid), UNIQUE(source_id, url)
-      );
-      CREATE INDEX IF NOT EXISTS articles_date ON articles(published_at DESC, collected_at DESC);
-      CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS collection_lock (id INTEGER PRIMARY KEY CHECK(id=1), owner TEXT NOT NULL, expires_at TEXT NOT NULL);
-      PRAGMA user_version = 1;
     `);
-    const sourceColumns = this.db
-      .prepare("PRAGMA table_info(sources)")
-      .all() as Row[];
-    if (!sourceColumns.some((column) => column.name === "last_feed_count")) {
-      this.db.exec("ALTER TABLE sources ADD COLUMN last_feed_count INTEGER");
+    try {
+      migrate(this.db);
+    } catch (error) {
+      this.db.close();
+      throw error;
     }
     this.db
       .prepare("INSERT OR IGNORE INTO settings VALUES ('profile', ?)")
@@ -56,18 +40,33 @@ export class MonitorStore {
       const insert = this.db.prepare(
         "INSERT OR IGNORE INTO sources (id,name,site_url,feed_url,language,status,last_error) VALUES (?,?,?,?,?,?,?)",
       );
-      for (const source of seeds)
+      for (const source of seeds) {
+        const supported = !!resolveCollection(source.siteUrl, source.feedUrl);
         insert.run(
           source.id,
           source.name,
           source.siteUrl,
           source.feedUrl,
           source.language,
-          source.feedUrl ? "pending" : "unsupported",
-          source.feedUrl
+          supported ? "pending" : "unsupported",
+          supported
             ? null
-            : "Aucun flux RSS confirmé. Un connecteur dédié reste à ajouter.",
+            : "Aucun flux ni connecteur disponible pour cette source.",
         );
+      }
+    }
+    // Newly supported websites become collectible without replacing personal configuration.
+    for (const source of this.sources()) {
+      if (
+        source.status === "unsupported" &&
+        source.collectionKind !== "unsupported"
+      ) {
+        this.db
+          .prepare(
+            "UPDATE sources SET status='pending',last_error=NULL WHERE id=?",
+          )
+          .run(source.id);
+      }
     }
   }
 
@@ -82,6 +81,12 @@ export class MonitorStore {
       name: String(r.name),
       siteUrl: String(r.site_url),
       feedUrl: r.feed_url as string | null,
+      collectionKind:
+        resolveCollection(String(r.site_url), r.feed_url as string | null)
+          ?.kind ?? "unsupported",
+      collectionUrl:
+        resolveCollection(String(r.site_url), r.feed_url as string | null)
+          ?.url ?? null,
       language: String(r.language),
       enabled: !!r.enabled,
       status: r.status as Source["status"],
@@ -116,20 +121,32 @@ export class MonitorStore {
     feedUrl: string | null;
     language: string;
   }) {
+    const supported = !!resolveCollection(input.siteUrl, input.feedUrl);
     const existing = this.db
-      .prepare("SELECT id FROM sources WHERE site_url=?")
+      .prepare("SELECT id,feed_url,language FROM sources WHERE site_url=?")
       .get(input.siteUrl) as Row | undefined;
     if (existing) {
+      if (
+        existing.feed_url === input.feedUrl &&
+        existing.language === input.language
+      ) {
+        this.db
+          .prepare("UPDATE sources SET name=? WHERE id=?")
+          .run(input.name, existing.id);
+        return String(existing.id);
+      }
       this.db
         .prepare(
-          "UPDATE sources SET name=?,feed_url=?,language=?,status=?,last_error=?,etag=NULL,last_modified=NULL,last_checked_at=NULL WHERE id=?",
+          "UPDATE sources SET name=?,feed_url=?,language=?,status=?,last_error=?,etag=NULL,last_modified=NULL,last_checked_at=NULL,last_success_at=NULL,last_feed_count=NULL WHERE id=?",
         )
         .run(
           input.name,
           input.feedUrl,
           input.language,
-          input.feedUrl ? "pending" : "unsupported",
-          input.feedUrl ? null : "Aucun flux RSS/Atom annoncé sur cette page.",
+          supported ? "pending" : "unsupported",
+          supported
+            ? null
+            : "Aucun flux ni connecteur disponible pour cette source.",
           existing.id,
         );
       return String(existing.id);
@@ -145,8 +162,10 @@ export class MonitorStore {
         input.siteUrl,
         input.feedUrl,
         input.language,
-        input.feedUrl ? "pending" : "unsupported",
-        input.feedUrl ? null : "Aucun flux RSS/Atom annoncé sur cette page.",
+        supported ? "pending" : "unsupported",
+        supported
+          ? null
+          : "Aucun flux ni connecteur disponible pour cette source.",
       );
     return id;
   }
@@ -178,11 +197,13 @@ export class MonitorStore {
             "SELECT id,content_hash FROM articles WHERE source_id=? AND (guid=? OR url=?) LIMIT 1",
           )
           .get(sourceId, entry.guid, entry.url) as Row | undefined;
+        const contentBasis =
+          entry.contentBasis ?? (entry.text ? "feed_text" : "metadata");
         if (existing?.content_hash === entry.contentHash) continue;
         if (existing) {
           this.db
             .prepare(
-              "UPDATE articles SET url=?,title=?,published_at=?,text=?,excerpt=?,language=?,format=?,content_hash=? WHERE id=?",
+              "UPDATE articles SET url=?,title=?,published_at=?,text=?,excerpt=?,language=?,format=?,content_hash=?,content_basis=? WHERE id=?",
             )
             .run(
               entry.url,
@@ -193,13 +214,14 @@ export class MonitorStore {
               entry.language,
               entry.format,
               entry.contentHash,
+              contentBasis,
               existing.id,
             );
           updated++;
         } else {
           this.db
             .prepare(
-              "INSERT INTO articles (id,source_id,guid,url,title,published_at,collected_at,text,excerpt,language,format,content_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+              "INSERT INTO articles (id,source_id,guid,url,title,published_at,collected_at,text,excerpt,language,format,content_hash,content_basis) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             )
             .run(
               randomUUID(),
@@ -214,6 +236,7 @@ export class MonitorStore {
               entry.language,
               entry.format,
               entry.contentHash,
+              contentBasis,
             );
           added++;
         }
@@ -245,7 +268,7 @@ export class MonitorStore {
       language: String(r.language),
       format: r.format as Article["format"],
       excerpt: r.excerpt as string | null,
-      contentBasis: r.text ? "feed_text" : "metadata",
+      contentBasis: r.content_basis as Article["contentBasis"],
       isRead: !!r.is_read,
       saved: !!r.saved,
       feedback: r.feedback as Feedback | null,

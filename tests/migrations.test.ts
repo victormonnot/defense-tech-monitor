@@ -52,14 +52,14 @@ test("version 1 upgrades preserve publications, personal state, profile and sour
   const before = old.snapshot().articles;
   // Reconstruct the schema shipped before provenance and versioned migrations.
   old.db.exec(
-    "ALTER TABLE articles DROP COLUMN content_basis; ALTER TABLE sources DROP COLUMN last_feed_count; PRAGMA user_version=1;",
+    "ALTER TABLE articles DROP COLUMN content_basis; ALTER TABLE articles DROP COLUMN keep_separate; ALTER TABLE sources DROP COLUMN last_feed_count; PRAGMA user_version=1;",
   );
   old.db.close();
 
   const upgraded = new MonitorStore(path);
   assert.equal(
     upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
-    2,
+    3,
   );
   assert.deepEqual(upgraded.snapshot().articles, before);
   assert.deepEqual(upgraded.profile(), profile);
@@ -88,7 +88,7 @@ test("fresh migrations are idempotent and reject newer schemas without downgradi
   try {
     migrate(db);
     migrate(db);
-    assert.equal(db.prepare("PRAGMA user_version").get()?.user_version, 2);
+    assert.equal(db.prepare("PRAGMA user_version").get()?.user_version, 3);
     db.exec("PRAGMA user_version=99");
     assert.throws(() => migrate(db), /newer than/);
     assert.equal(db.prepare("PRAGMA user_version").get()?.user_version, 99);
@@ -97,5 +97,50 @@ test("fresh migrations are idempotent and reject newer schemas without downgradi
     );
   } finally {
     db.close();
+  }
+});
+
+test("version 2 upgrades add reversible grouping preferences without changing existing records", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "dtm-migration-v2-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const path = join(directory, "monitor.sqlite");
+  const old = new MonitorStore(path);
+  old.upsertEntries(
+    "brave1",
+    [
+      {
+        guid: "synthetic-metadata",
+        url: "https://example.test/metadata",
+        title: "Synthetic metadata publication",
+        publishedAt: "2026-01-01",
+        text: "",
+        excerpt: null,
+        contentBasis: "metadata",
+        language: "en",
+        format: "article",
+        contentHash: "synthetic-hash",
+      },
+    ],
+    "2026-01-02T12:00:00.000Z",
+  );
+  const id = old.snapshot().articles[0].id;
+  old.setArticleState(id, "saved", true);
+  old.setArticleState(id, "feedback", "seen");
+  old.toggleSource("brave1", false);
+  const before = old.snapshot();
+  old.db.exec(
+    "ALTER TABLE articles DROP COLUMN keep_separate; PRAGMA user_version=2;",
+  );
+  old.db.close();
+  const upgraded = new MonitorStore(path);
+  try {
+    assert.equal(
+      upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
+      3,
+    );
+    assert.deepEqual(upgraded.snapshot(), before);
+    assert.equal(upgraded.snapshot().articles[0].keepSeparate, false);
+  } finally {
+    upgraded.db.close();
   }
 });

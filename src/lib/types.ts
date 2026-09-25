@@ -1,3 +1,5 @@
+import type { StoryGroup, StoryRelation } from "./stories";
+
 export type Feedback = "relevant" | "off_topic" | "seen";
 export type SourceStatus = "pending" | "ok" | "empty" | "error" | "unsupported";
 export type ContentBasis = "feed_text" | "page_excerpt" | "metadata";
@@ -36,6 +38,7 @@ export interface Article {
   isRead: boolean;
   saved: boolean;
   feedback: Feedback | null;
+  keepSeparate: boolean;
 }
 
 export interface Profile {
@@ -48,6 +51,7 @@ export interface Snapshot {
   articles: Article[];
   sources: Source[];
   profile: Profile;
+  stories: { groups: StoryGroup[]; related: StoryRelation[] };
   stats: { total: number; selected: number; unread: number; saved: number };
   evaluation: {
     reviewed: number;
@@ -69,5 +73,6 @@ export type MonitorAction =
   | { action: "toggleSource"; id: string; enabled: boolean }
   | { action: "setRead"; id: string; value: boolean }
   | { action: "setSaved"; id: string; value: boolean }
+  | { action: "setSeparate"; id: string; value: boolean }
   | { action: "setFeedback"; id: string; value: Feedback | null }
   | { action: "updateProfile"; profile: Profile };

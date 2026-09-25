@@ -7,6 +7,7 @@ import { defaultProfile, rulesClassifier, type Classifier } from "./classifier";
 import type { FeedEntry } from "./feed";
 import { migrate } from "./migrations";
 import { resolveCollection } from "./connectors";
+import { buildStories } from "./stories";
 import type { Article, Feedback, Profile, Snapshot, Source } from "./types";
 
 type Row = Record<string, string | number | null>;
@@ -178,7 +179,7 @@ export class MonitorStore {
 
   setArticleState(
     id: string,
-    field: "is_read" | "saved" | "feedback",
+    field: "is_read" | "saved" | "feedback" | "keep_separate",
     value: boolean | Feedback | null,
   ) {
     this.db
@@ -272,6 +273,7 @@ export class MonitorStore {
       isRead: !!r.is_read,
       saved: !!r.saved,
       feedback: r.feedback as Feedback | null,
+      keepSeparate: !!r.keep_separate,
       ...this.classifier.classify(`${r.title}\n${r.text}`, profile),
     }));
     const selected = articles.filter(
@@ -284,6 +286,17 @@ export class MonitorStore {
       articles,
       sources,
       profile,
+      stories: buildStories(
+        articles.map((article, index) => ({
+          ...article,
+          comparisonText: String(rows[index].text),
+        })),
+        new Set(
+          articles
+            .filter((article) => article.keepSeparate)
+            .map((article) => article.id),
+        ),
+      ),
       stats: {
         total: articles.length,
         selected: selected.length,

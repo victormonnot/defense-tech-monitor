@@ -13,6 +13,7 @@ import {
   ExternalLink,
   Eye,
   Globe2,
+  Layers3,
   ListFilter,
   LoaderCircle,
   Pencil,
@@ -22,6 +23,7 @@ import {
   Search,
   Settings2,
   Signal,
+  Split,
   ThumbsDown,
   ThumbsUp,
   X,
@@ -35,9 +37,12 @@ import type {
   Source,
   SourceStatus,
 } from "@/lib/types";
+import type { StoryGroup } from "@/lib/stories";
+import { buildFeedItems } from "@/lib/story-feed";
 
 type View = "personal" | "all" | "saved" | "sources" | "profile";
 type Notice = { kind: "success" | "error"; text: string } | null;
+type RelatedPublication = { article: Article; reason: string };
 
 const views = [
   { id: "personal", label: "Pour moi", icon: Compass },
@@ -145,6 +150,7 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
   const [languageFilter, setLanguageFilter] = useState("");
   const [themeFilter, setThemeFilter] = useState("");
   const [formatFilter, setFormatFilter] = useState("");
+  const [groupStories, setGroupStories] = useState(true);
   const [keywords, setKeywords] = useState(data.profile.keywords.join(", "));
   const [excludeKeywords, setExcludeKeywords] = useState(
     data.profile.excludeKeywords.join(", "),
@@ -202,6 +208,30 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
     themeFilter,
     formatFilter,
   ]);
+
+  const feedItems = useMemo(
+    () => buildFeedItems(articles, groupStories ? data.stories.groups : []),
+    [articles, groupStories, data.stories.groups],
+  );
+  const groupedCount = feedItems.filter((item) => item.group).length;
+  const relatedByArticle = useMemo(() => {
+    const visible = new Map(articles.map((article) => [article.id, article]));
+    const relations = new Map<string, RelatedPublication[]>();
+    for (const { articleIds, reason } of data.stories.related) {
+      const first = visible.get(articleIds[0]);
+      const second = visible.get(articleIds[1]);
+      if (!first || !second) continue;
+      relations.set(first.id, [
+        ...(relations.get(first.id) ?? []),
+        { article: second, reason },
+      ]);
+      relations.set(second.id, [
+        ...(relations.get(second.id) ?? []),
+        { article: first, reason },
+      ]);
+    }
+    return relations;
+  }, [articles, data.stories.related]);
 
   async function mutate(
     action: MonitorAction,
@@ -572,17 +602,59 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                     )}
                   </div>
                 </div>
-                <div className="article-list" aria-busy={busy}>
-                  {articles.map((article) => (
-                    <ArticleCard
-                      key={article.id}
-                      article={article}
-                      busy={busy}
-                      onAction={(action) =>
-                        void mutate(action, `${action.action}-${article.id}`)
+                <div className="feed-display-controls">
+                  <label className="grouping-toggle">
+                    <input
+                      type="checkbox"
+                      checked={groupStories}
+                      onChange={(event) =>
+                        setGroupStories(event.target.checked)
                       }
                     />
-                  ))}
+                    Regrouper les annonces similaires
+                  </label>
+                  <p className="feed-count" role="status">
+                    {articles.length} publication
+                    {articles.length > 1 ? "s" : ""}
+                    {groupedCount > 0 && (
+                      <>
+                        {" "}
+                        · {feedItems.length} fiche
+                        {feedItems.length > 1 ? "s" : ""} affichée
+                        {feedItems.length > 1 ? "s" : ""}, dont {groupedCount}{" "}
+                        regroupement{groupedCount > 1 ? "s" : ""}
+                      </>
+                    )}
+                  </p>
+                </div>
+                <div className="article-list" aria-busy={busy}>
+                  {feedItems.map((item) => {
+                    const onAction = (action: MonitorAction) =>
+                      void mutate(
+                        action,
+                        "id" in action
+                          ? `${action.action}-${action.id}`
+                          : action.action,
+                      );
+                    return item.group ? (
+                      <StoryCard
+                        key={item.id}
+                        articles={item.articles}
+                        group={item.group}
+                        relatedByArticle={relatedByArticle}
+                        busy={busy}
+                        onAction={onAction}
+                      />
+                    ) : (
+                      <ArticleCard
+                        key={item.id}
+                        article={item.articles[0]}
+                        related={relatedByArticle.get(item.articles[0].id)}
+                        busy={busy}
+                        onAction={onAction}
+                      />
+                    );
+                  })}
                   {articles.length === 0 && (
                     <div className="empty-state">
                       <span className="empty-icon">
@@ -1120,12 +1192,142 @@ function Filter({
   );
 }
 
-function ArticleCard({
+function SeparateAction({
   article,
   busy,
   onAction,
 }: {
   article: Article;
+  busy: boolean;
+  onAction: (action: MonitorAction) => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="article-action separate-action"
+      disabled={busy}
+      onClick={() =>
+        onAction({
+          action: "setSeparate",
+          id: article.id,
+          value: !article.keepSeparate,
+        })
+      }
+    >
+      {article.keepSeparate ? <Layers3 size={15} /> : <Split size={15} />}
+      {article.keepSeparate ? "Rétablir le regroupement" : "Conserver séparé"}
+    </button>
+  );
+}
+
+function StoryCard({
+  articles,
+  group,
+  relatedByArticle,
+  busy,
+  onAction,
+}: {
+  articles: Article[];
+  group: StoryGroup;
+  relatedByArticle: Map<string, RelatedPublication[]>;
+  busy: boolean;
+  onAction: (action: MonitorAction) => void;
+}) {
+  const [lead, ...otherArticles] = articles;
+  const sources = [...new Set(articles.map((article) => article.sourceName))];
+  return (
+    <section className="story-card" aria-label="Même annonce probable">
+      <header className="story-header">
+        <div className="story-label">
+          <Layers3 size={16} />
+          <strong>Même annonce probable</strong>
+          <span>{articles.length} publications</span>
+        </div>
+        <p className="story-sources">{sources.join(" · ")}</p>
+        <p className="story-caution">
+          Ces reprises ne constituent pas des confirmations indépendantes.
+        </p>
+        <details className="story-explanation">
+          <summary>Pourquoi ce regroupement ?</summary>
+          <p>{group.reason}</p>
+          <p>
+            Comparaison des titres et du texte collecté dans les flux ou les
+            pages de liste. Le contenu intégral des articles n’est pas
+            nécessairement disponible. Vous pouvez conserver chaque publication
+            séparément.
+          </p>
+        </details>
+      </header>
+      <ArticleCard
+        article={lead}
+        grouped
+        related={relatedByArticle.get(lead.id)}
+        busy={busy}
+        onAction={onAction}
+      />
+      <div className="story-members">
+        <p className="story-members-label">Autres publications rapprochées</p>
+        {otherArticles.map((article) => (
+          <div className="story-member" key={article.id}>
+            <div className="article-meta">
+              <span className="article-source">{article.sourceName}</span>
+              <span className="meta-dot">·</span>
+              <time dateTime={article.publishedAt ?? undefined}>
+                {dateLabel(article.publishedAt)}
+              </time>
+              <span className="meta-dot">·</span>
+              <span>{languageLabel(article.language)}</span>
+            </div>
+            <h3>
+              <a href={article.url} target="_blank" rel="noreferrer">
+                {article.title} <ArrowUpRight size={15} />
+              </a>
+            </h3>
+            <div className="story-member-status">
+              <span>
+                {article.isRead ? <Check size={13} /> : <Eye size={13} />}
+                {article.isRead ? "Lu" : "Non lu"}
+              </span>
+              <span>
+                <Bookmark
+                  size={13}
+                  fill={article.saved ? "currentColor" : "none"}
+                />
+                {article.saved ? "Sauvegardé" : "Non sauvegardé"}
+              </span>
+              <SeparateAction
+                article={article}
+                busy={busy}
+                onAction={onAction}
+              />
+            </div>
+            <details className="story-member-details">
+              <summary>Détails et actions pour cette publication</summary>
+              <ArticleCard
+                article={article}
+                grouped
+                related={relatedByArticle.get(article.id)}
+                busy={busy}
+                onAction={onAction}
+              />
+            </details>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ArticleCard({
+  article,
+  grouped = false,
+  related = [],
+  busy,
+  onAction,
+}: {
+  article: Article;
+  grouped?: boolean;
+  related?: RelatedPublication[];
   busy: boolean;
   onAction: (action: MonitorAction) => void;
 }) {
@@ -1207,6 +1409,32 @@ function ArticleCard({
             </details>
           )}
         </div>
+        {article.keepSeparate && (
+          <p className="separate-note">
+            Conservée séparément selon votre choix.
+          </p>
+        )}
+        {related.length > 0 && (
+          <aside className="related-publications" aria-label="Sujets proches">
+            <strong>Sujet proche, différence possible</strong>
+            <ul>
+              {related.map(({ article: other, reason }) => (
+                <li key={other.id}>
+                  <a href={other.url} target="_blank" rel="noreferrer">
+                    {other.title} <ArrowUpRight size={13} />
+                  </a>
+                  <span>
+                    {other.sourceName} · {reason}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <p>
+              Ces publications restent séparées. Le texte disponible ne permet
+              pas de confirmer qu’elles apportent la même information.
+            </p>
+          </aside>
+        )}
       </div>
       <div
         className="article-score"
@@ -1280,6 +1508,9 @@ function ArticleCard({
             </button>
           ))}
         </div>
+        {(grouped || article.keepSeparate) && (
+          <SeparateAction article={article} busy={busy} onAction={onAction} />
+        )}
         <a
           className="original-link"
           href={article.url}

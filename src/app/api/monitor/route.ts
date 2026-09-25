@@ -95,13 +95,22 @@ export async function POST(request: NextRequest) {
         break;
       }
       case "setRead":
-      case "setSaved": {
+      case "setSaved":
+      case "setSeparate": {
         if (typeof body.value !== "boolean") throw new Error("État invalide.");
         store.setArticleState(
           text(body.id, "Publication"),
-          body.action === "setRead" ? "is_read" : "saved",
+          body.action === "setRead"
+            ? "is_read"
+            : body.action === "setSaved"
+              ? "saved"
+              : "keep_separate",
           body.value,
         );
+        if (body.action === "setSeparate")
+          message = body.value
+            ? "Publication conservée séparément."
+            : "Regroupement automatique rétabli pour cette publication.";
         break;
       }
       case "setFeedback": {

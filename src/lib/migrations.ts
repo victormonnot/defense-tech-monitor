@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-const CURRENT_VERSION = 2;
+const CURRENT_VERSION = 3;
 
 export function migrate(db: DatabaseSync) {
   db.exec("BEGIN IMMEDIATE");
@@ -46,6 +46,13 @@ export function migrate(db: DatabaseSync) {
           CHECK(content_basis IN ('metadata', 'feed_text', 'page_excerpt'));
         UPDATE articles SET content_basis='feed_text' WHERE text <> '';
         PRAGMA user_version = 2;
+      `);
+    }
+    if (version < 3) {
+      db.exec(`
+        ALTER TABLE articles ADD COLUMN keep_separate INTEGER NOT NULL DEFAULT 0
+          CHECK(keep_separate IN (0, 1));
+        PRAGMA user_version = 3;
       `);
     }
     db.exec("COMMIT");

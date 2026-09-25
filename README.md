@@ -42,6 +42,14 @@ Start collection with **Refresh sources — Actualiser les sources** or `npm run
 
 Feedback is saved as relevant, off-topic, or already seen. The profile view reports publications you marked relevant that the rules missed, and publications selected by the rules that you marked off-topic. Feedback does not trigger automatic model training.
 
+### Similar announcements
+
+**Group similar announcements — Regrouper les annonces similaires** reduces repeated coverage in the feed. A likely match keeps one full card and lists the other publications with their original titles, links, dates, and read/saved states. Expand each publication to read its available excerpt or change its own state. Reading, saving, or rating one publication never changes the others.
+
+Grouping applies after the current view and filters. Saved publications remain individually saved, and filtering by source never brings hidden sources back into the results. Counters distinguish publications from displayed cards. Turn grouping off to see every publication as a full card.
+
+Use **Keep separate — Conserver séparé** to exclude a publication from automatic groups. This choice survives collection and restarts; **Restore grouping — Rétablir le regroupement** reverses it. Related publications with differing details remain separate and can display a comparison link. These suggestions do not establish whether an article contains a genuine new development or whether several outlets independently confirmed a claim.
+
 ## Sources
 
 The four initial sources are defined in [`config/sources.json`](config/sources.json) and seeded into the database on first launch. Existing database entries are not overwritten by this file. Sources added through the interface remain in the local database.
@@ -68,11 +76,11 @@ Collection respects `robots.txt`, limits response size, applies timeouts, and va
 - Available feed text is analyzed up to a limit of 20,000 characters and is not necessarily the complete article. Public-page connectors use only the content available in listing cards: Brave1 provides metadata only, while Defender Media also provides card excerpts. The interface identifies the content used for analysis and displays excerpts of up to 400 characters; the API does not expose the stored article body. Metadata-only publications have no excerpt or generated summary.
 - Full articles are not republished. The application does not bypass paywalls, transcribe videos, or invent summaries from titles.
 - Classification uses deterministic keyword rules, with limitations around synonyms and languages. Matches indicate relevance to a profile, never the reliability of a claim.
-- Repeated imports of a publication from the same source are detected through its identifier or normalized URL. **Coverage of the same announcement across different outlets is not yet grouped**, and repeated coverage is not presented as independent confirmation.
+- Repeated imports of a publication from the same source are detected through its identifier or normalized URL. Cross-source grouping requires the same known language, publication dates no more than seven days apart, and matching ordered title words after typographic normalization, including specific terms beyond generic defense vocabulary. When text is available, all collected text must also match in word order, not just the displayed excerpt. All members must match each other; a chain of loosely related articles is insufficient. Missing dates, different languages, changed numbers, follow-up signals, and different or incomplete text prevent grouping. Weaker title matches remain separate with comparison hints. This favors missed matches over hiding new information. It does not translate titles, fetch additional article bodies, or verify claims.
 - This version does not include exhaustive archive imports, generated summaries, topic folders, alerts, or audio.
 - The database and `.env` files are excluded from Git. The example configuration contains no secrets. To back up local data, stop the application and copy the `data/` directory.
 
-Existing databases are upgraded automatically to schema version 2 when opened. This migration adds collection and content-provenance metadata while preserving collected publications, read and saved states, feedback, source activation settings, and the keyword profile.
+Existing databases are upgraded automatically to schema version 3 when opened. Migrations add content provenance and a per-publication grouping preference while preserving collected publications, read and saved states, feedback, source activation settings, and the keyword profile. Groups are derived from the current publications; they do not merge or delete database records.
 
 ## Architecture
 
@@ -86,6 +94,8 @@ src/lib/collector.ts   Collection, caching, and error handling
 src/lib/store.ts       SQLite persistence and personal state
 src/lib/migrations.ts  Versioned database upgrades
 src/lib/classifier.ts  Replaceable classification and explicit rules
+src/lib/stories.ts     Conservative announcement grouping and comparison hints
+src/lib/story-feed.ts  Group presentation after view and search filters
 src/app/api/monitor/   Local reads and mutations
 src/components/       Monitoring interface
 scripts/collect.ts    Command-line collection

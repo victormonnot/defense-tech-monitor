@@ -172,7 +172,11 @@ test("feed API validates edits, reports stale revisions, isolates feedback and k
   const changes = store.db
     .prepare("SELECT total_changes() AS count")
     .get()?.count;
-  const read = await GET();
+  const read = await GET(
+    new NextRequest(`${base}/api/monitor`, {
+      headers: { host: "127.0.0.1:3001" },
+    }),
+  );
   assert.equal(read.headers.get("cache-control"), "no-store");
   assert.equal(
     store.db.prepare("SELECT total_changes() AS count").get()?.count,

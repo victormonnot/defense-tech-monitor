@@ -32,6 +32,12 @@ test("Jev API validates mode and origin, keeps GET free of paid work and never e
     store.db.close();
   });
   const base = "http://127.0.0.1:3001";
+  const get = () =>
+    GET(
+      new NextRequest(`${base}/api/monitor`, {
+        headers: { host: "127.0.0.1:3001" },
+      }),
+    );
   const post = (body: unknown, origin = base) =>
     POST(
       new NextRequest(`${base}/api/monitor`, {
@@ -44,7 +50,7 @@ test("Jev API validates mode and origin, keeps GET free of paid work and never e
         body: JSON.stringify(body),
       }),
     );
-  assert.equal((await (await GET()).json()).snapshot.jev.mode, "off");
+  assert.equal((await (await get()).json()).snapshot.jev.mode, "off");
   assert.equal(
     (await post({ action: "setJevMode", mode: "compare" })).status,
     400,
@@ -74,8 +80,8 @@ test("Jev API validates mode and origin, keeps GET free of paid work and never e
     403,
   );
   const before = store.db.prepare("SELECT * FROM settings ORDER BY key").all();
-  await GET();
-  await GET();
+  await get();
+  await get();
   assert.deepEqual(
     store.db.prepare("SELECT * FROM settings ORDER BY key").all(),
     before,

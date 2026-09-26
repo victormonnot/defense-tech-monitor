@@ -1,15 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
+import { assertRequestAccess, RequestAccessError } from "@/lib/request-access";
 
 export function proxy(request: NextRequest) {
-  const host = request.headers.get("host") ?? "";
-  if (!/^(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/.test(host)) {
-    return new NextResponse("This instance accepts local connections only.", {
-      status: 403,
-    });
+  try {
+    assertRequestAccess(request);
+    return NextResponse.next();
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error:
+          error instanceof RequestAccessError
+            ? error.message
+            : "L’accès à l’application est momentanément indisponible.",
+      },
+      {
+        status: error instanceof RequestAccessError ? error.status : 503,
+        headers: {
+          "Cache-Control": "private, no-store",
+          "X-Content-Type-Options": "nosniff",
+        },
+      },
+    );
   }
-  return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.svg).*)"],
+  matcher: ["/:path*"],
 };

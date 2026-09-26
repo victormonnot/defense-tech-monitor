@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const config: NextConfig = {
+  ...(process.env.BUILD_STANDALONE === "1" ? { output: "standalone" } : {}),
   agentRules: false,
   serverExternalPackages: ["rss-parser"],
   poweredByHeader: false,

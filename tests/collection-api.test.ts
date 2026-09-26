@@ -16,6 +16,12 @@ test("collection API persists validated schedules and records manual runs withou
     store.db.close();
   });
   const base = "http://127.0.0.1:3001";
+  const get = () =>
+    GET(
+      new NextRequest(`${base}/api/monitor`, {
+        headers: { host: "127.0.0.1:3001" },
+      }),
+    );
   async function post(body: unknown, origin = base) {
     return POST(
       new NextRequest(`${base}/api/monitor`, {
@@ -30,7 +36,7 @@ test("collection API persists validated schedules and records manual runs withou
     );
   }
 
-  const initialResponse = await GET();
+  const initialResponse = await get();
   assert.equal(initialResponse.headers.get("cache-control"), "no-store");
   const initial = (await initialResponse.json()).snapshot;
   assert.equal(initial.collection.enabled, false);
@@ -89,5 +95,5 @@ test("collection API persists validated schedules and records manual runs withou
   });
   assert.deepEqual(collected.articles, initial.articles);
   assert.deepEqual(collected.profile, initial.profile);
-  assert.deepEqual((await (await GET()).json()).snapshot, collected);
+  assert.deepEqual((await (await get()).json()).snapshot, collected);
 });

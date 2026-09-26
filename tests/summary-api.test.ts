@@ -71,6 +71,12 @@ test("summary API checks origin, makes no GET calls and returns persisted failed
     );
   };
   const base = "http://127.0.0.1:3001";
+  const get = () =>
+    GET(
+      new NextRequest(`${base}/api/monitor`, {
+        headers: { host: "127.0.0.1:3001" },
+      }),
+    );
   async function post(body: unknown, origin = base) {
     return POST(
       new NextRequest(`${base}/api/monitor`, {
@@ -113,7 +119,7 @@ test("summary API checks origin, makes no GET calls and returns persisted failed
   const changes = store.db
     .prepare("SELECT total_changes() AS count")
     .get()?.count;
-  const initial = await GET();
+  const initial = await get();
   assert.equal(initial.status, 200);
   assert.equal(initial.headers.get("cache-control"), "no-store");
   assert.equal(
@@ -141,7 +147,7 @@ test("summary API checks origin, makes no GET calls and returns persisted failed
   assert.equal(generated.error, undefined);
   assert.equal(calls, 1);
   await post(action);
-  await GET();
+  await get();
   assert.equal(calls, 1);
   fail = true;
   const failedResponse = await post({

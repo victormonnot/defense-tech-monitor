@@ -1,0 +1,25 @@
+# Only application source and build inputs enter the image context.
+**
+!package.json
+!package-lock.json
+!next.config.ts
+!tsconfig.json
+!src/
+!src/**
+!config/
+!config/*.json
+!public/
+!public/**
+
+# Keep private data excluded even within an included directory.
+**/.env
+**/.env.*
+**/*.sqlite
+**/*.sqlite-*
+**/*.sqlite3
+**/*.sqlite3-*
+**/*.db
+**/*.db-*
+**/*.pem
+**/*.key
+**/.DS_Store

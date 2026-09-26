@@ -26,7 +26,7 @@ npm run build
 npm start
 ```
 
-The application is intended for local, single-user use. The server binds to the loopback interface and rejects external hostnames. Deploying it publicly would require authentication, separation of private data, and a backup strategy.
+The application uses one personal profile. Local commands bind to the loopback interface and reject external hostnames by default. For private HTTPS access on a VPS, follow the [Coolify deployment guide](deploy/README.md), which provides an authenticated gateway, persistent SQLite storage, and backup and restore instructions.
 
 ## Usage
 

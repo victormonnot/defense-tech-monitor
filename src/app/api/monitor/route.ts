@@ -11,6 +11,11 @@ import { parseCollectionSchedule } from "@/lib/collection-state";
 import { setJevMode, retryJevFailures } from "@/lib/jev-store";
 import { parseFeedInput } from "@/lib/custom-feeds";
 import { processArticleSummary } from "@/lib/summary-service";
+import {
+  assertRequestAccess,
+  assertRequestOrigin,
+  RequestAccessError,
+} from "@/lib/request-access";
 import type { Feedback } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -23,7 +28,27 @@ function json(body: unknown, status = 200) {
   });
 }
 
-export async function GET() {
+function checkAccess(request: NextRequest, mutation = false) {
+  try {
+    const access = assertRequestAccess(request);
+    assertRequestOrigin(request, access, mutation);
+    return null;
+  } catch (error) {
+    return json(
+      {
+        error:
+          error instanceof RequestAccessError
+            ? error.message
+            : "L’accès à l’application est momentanément indisponible.",
+      },
+      error instanceof RequestAccessError ? error.status : 503,
+    );
+  }
+}
+
+export async function GET(request: NextRequest) {
+  const denied = checkAccess(request);
+  if (denied) return denied;
   return json({ snapshot: getStore().snapshot() });
 }
 
@@ -34,21 +59,8 @@ function text(value: unknown, label: string, max = 200) {
 }
 
 export async function POST(request: NextRequest) {
-  // This is a local, single-user app. Cross-site requests may not mutate its data.
-  const origin = request.headers.get("origin");
-  const host = request.headers.get("host");
-  let sameOrigin = false;
-  try {
-    const parsedOrigin = new URL(origin ?? "");
-    sameOrigin =
-      ["http:", "https:"].includes(parsedOrigin.protocol) &&
-      parsedOrigin.host === host &&
-      parsedOrigin.origin === origin;
-  } catch {
-    /* Missing or malformed origins are rejected. */
-  }
-  if (!sameOrigin)
-    return json({ error: "Origine de requête non autorisée." }, 403);
+  const denied = checkAccess(request, true);
+  if (denied) return denied;
   if (!request.headers.get("content-type")?.startsWith("application/json"))
     return json({ error: "JSON requis." }, 415);
   try {

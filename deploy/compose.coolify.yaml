@@ -1,0 +1,77 @@
+# Coolify supplies the public HTTPS route to gateway:80.
+# Neither service publishes a host port.
+# Configure secrets as runtime variables, never as build arguments.
+services:
+  app:
+    build:
+      # Coolify sets --project-directory to the repository's Base Directory.
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 60s
+    deploy:
+      replicas: 1
+    environment:
+      DTM_DATABASE_PATH: /app/data/monitor.sqlite
+      DTM_APP_ORIGIN: https://${APP_HOST}
+      DTM_PROXY_SECRET: ${APP_PROXY_SECRET}
+      DTM_COLLECTION_INTERVAL_MINUTES: ${DTM_COLLECTION_INTERVAL_MINUTES:-15}
+      TYPESAFE_API_KEY: ${TYPESAFE_API_KEY}
+      DTM_JEV_MONTHLY_BUDGET_USD: ${DTM_JEV_MONTHLY_BUDGET_USD:-0}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      DTM_SUMMARY_MONTHLY_BUDGET_USD: ${DTM_SUMMARY_MONTHLY_BUDGET_USD:-0}
+      DTM_SUMMARY_MODEL: ${DTM_SUMMARY_MODEL}
+    volumes:
+      - app_data:/app/data
+
+  gateway:
+    image: caddy:2.11.4-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      APP_LOGIN: ${APP_LOGIN}
+      APP_PASSWORD_HASH: ${APP_PASSWORD_HASH}
+      APP_PROXY_SECRET: ${APP_PROXY_SECRET}
+    expose:
+      - "80"
+    configs:
+      - source: gateway_caddyfile
+        target: /etc/caddy/Caddyfile
+
+configs:
+  gateway_caddyfile:
+    content: |
+      {
+        admin off
+        auto_https off
+      }
+
+      :80 {
+        header {
+          Cache-Control "private, no-store"
+          X-Frame-Options "DENY"
+        }
+
+        basic_auth {
+          {$$APP_LOGIN} {$$APP_PASSWORD_HASH}
+        }
+
+        encode zstd gzip
+
+        request_body {
+          max_size 65536
+        }
+
+        reverse_proxy app:3000 {
+          header_up X-Dtm-Proxy-Secret {$$APP_PROXY_SECRET}
+          header_up -Authorization
+          header_down Cache-Control "private, no-store"
+          header_down X-Frame-Options "DENY"
+        }
+      }
+
+volumes:
+  app_data:

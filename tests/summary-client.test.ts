@@ -12,6 +12,12 @@ import {
   SUMMARY_RESERVED_NANODOLLARS,
 } from "../src/lib/summary-client";
 import type { SummaryInputArticle } from "../src/lib/summary-types";
+import {
+  summaryCostNanos,
+  summaryReservationNanos,
+  SUMMARY_MODELS,
+  type SummaryModel,
+} from "../src/lib/summary-models";
 
 const article: SummaryInputArticle = {
   id: "publication-1",
@@ -64,6 +70,90 @@ test("summary credentials and budget are independent from Jev and default to dis
   const invalid = getSummaryConfig({ OPENAI_API_KEY: "secret\nheader" });
   assert.equal(invalid.apiKey, null);
   assert.ok(!invalid.error?.includes("secret"));
+});
+
+test("only priced summary models are accepted and each model has an independent cache key", () => {
+  const keys = new Set<string>();
+  for (const model of Object.keys(SUMMARY_MODELS) as SummaryModel[]) {
+    assert.equal(getSummaryConfig({ DTM_SUMMARY_MODEL: model }).model, model);
+    const built = buildSummaryInput(article, model)!;
+    keys.add(built.cacheKey);
+    assert.equal(built.request.model, model);
+    assert.equal(
+      built.request.temperature,
+      SUMMARY_MODELS[model].effort === "minimal" ? undefined : 0.2,
+    );
+    assert.deepEqual(
+      built.request.reasoning,
+      SUMMARY_MODELS[model].reasoning
+        ? { effort: SUMMARY_MODELS[model].effort }
+        : undefined,
+    );
+  }
+  assert.equal(keys.size, 4);
+  for (const model of ["gpt-expensive-unknown", "toString", "__proto__"])
+    assert.ok(getSummaryConfig({ DTM_SUMMARY_MODEL: model }).error);
+  assert.equal(summaryReservationNanos("gpt-6-luna"), 8250000);
+  assert.equal(summaryReservationNanos("gpt-5.6-luna"), 16600000);
+});
+
+test("Luna usage accounts for cache reads and writes and rejects impossible token breakdowns", () => {
+  const value = {
+    ...response(),
+    model: "gpt-6-luna",
+    usage: {
+      input_tokens: 1000,
+      output_tokens: 100,
+      input_tokens_details: { cached_tokens: 600, cache_write_tokens: 200 },
+    },
+  };
+  const parsed = parseSummaryResult(value, "gpt-6-luna");
+  assert.equal(parsed.cachedInputTokens, 600);
+  assert.equal(parsed.cacheWriteTokens, 200);
+  assert.equal(summaryCostNanos(parsed), 101000);
+  assert.equal(
+    summaryCostNanos({
+      ...parsed,
+      cachedInputTokens: undefined,
+      cacheWriteTokens: undefined,
+    }),
+    175000,
+  );
+  assert.throws(
+    () => parseSummaryResult(value, "gpt-5.6-luna"),
+    SummaryRequestError,
+  );
+  assert.throws(
+    () =>
+      parseSummaryResult(
+        {
+          ...value,
+          usage: {
+            ...value.usage,
+            input_tokens_details: {
+              cached_tokens: 900,
+              cache_write_tokens: 200,
+            },
+          },
+        },
+        "gpt-6-luna",
+      ),
+    SummaryRequestError,
+  );
+  assert.throws(
+    () =>
+      parseSummaryResult(
+        {
+          ...value,
+          usage: {
+            ...value.usage,
+            input_tokens_details: { cached_tokens: 1.5, cache_write_tokens: 0 },
+          },
+        },
+        "gpt-6-luna",
+      ),
+    SummaryRequestError,
+  );
 });
 
 test("metadata and short excerpts cannot be summarized, even with a detailed title", () => {

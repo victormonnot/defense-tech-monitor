@@ -1,16 +1,24 @@
 import { createHash } from "node:crypto";
 import type { SummaryInputArticle, SummaryResult } from "./summary-types";
+import {
+  DEFAULT_SUMMARY_MODEL,
+  isSummaryModel,
+  SUMMARY_MODELS,
+  SUMMARY_MAX_INPUT_TOKENS,
+  SUMMARY_MAX_OUTPUT_TOKENS,
+  summaryReservationNanos,
+  summaryCostNanos,
+  type SummaryModel,
+} from "./summary-models";
 
-export const SUMMARY_MODEL = "gpt-4.1-mini-2025-04-14";
-export const SUMMARY_MAX_INPUT_TOKENS = 64000;
-export const SUMMARY_MAX_OUTPUT_TOKENS = 500;
-// Standard text rates: https://developers.openai.com/api/docs/models/gpt-4.1-mini
-// Cached input discounts are deliberately ignored by the local spending limit.
-export const SUMMARY_INPUT_NANODOLLARS_PER_TOKEN = 400;
-export const SUMMARY_OUTPUT_NANODOLLARS_PER_TOKEN = 1600;
+export const SUMMARY_MODEL = DEFAULT_SUMMARY_MODEL;
+export { SUMMARY_MAX_INPUT_TOKENS, SUMMARY_MAX_OUTPUT_TOKENS };
+export const SUMMARY_INPUT_NANODOLLARS_PER_TOKEN =
+  SUMMARY_MODELS[SUMMARY_MODEL].input;
+export const SUMMARY_OUTPUT_NANODOLLARS_PER_TOKEN =
+  SUMMARY_MODELS[SUMMARY_MODEL].output;
 export const SUMMARY_RESERVED_NANODOLLARS =
-  SUMMARY_MAX_INPUT_TOKENS * SUMMARY_INPUT_NANODOLLARS_PER_TOKEN +
-  SUMMARY_MAX_OUTPUT_TOKENS * SUMMARY_OUTPUT_NANODOLLARS_PER_TOKEN;
+  summaryReservationNanos(SUMMARY_MODEL);
 const MAX_REQUEST_BYTES = 32000;
 const MAX_RESPONSE_BYTES = 64000;
 const MIN_CONTENT_CHARACTERS = 400;
@@ -20,6 +28,7 @@ export interface SummaryConfig {
   apiKey: string | null;
   monthlyBudgetUsd: number;
   error: string | null;
+  model?: SummaryModel;
 }
 
 export function getSummaryConfig(
@@ -28,12 +37,24 @@ export function getSummaryConfig(
   const apiKey = env.OPENAI_API_KEY?.trim() || null;
   const raw = env.DTM_SUMMARY_MONTHLY_BUDGET_USD?.trim() || "0";
   const monthlyBudgetUsd = Number(raw);
+  const requestedModel = env.DTM_SUMMARY_MODEL?.trim() || DEFAULT_SUMMARY_MODEL;
+  if (!isSummaryModel(requestedModel))
+    return {
+      apiKey,
+      monthlyBudgetUsd: 0,
+      error:
+        "DTM_SUMMARY_MODEL doit désigner un modèle de résumé pris en charge.",
+    };
+  const selectedModel = env.DTM_SUMMARY_MODEL?.trim()
+    ? { model: requestedModel }
+    : {};
   if (
     !/^\d+(?:\.\d{1,2})?$/.test(raw) ||
     !Number.isFinite(monthlyBudgetUsd) ||
     monthlyBudgetUsd > 100
   )
     return {
+      ...selectedModel,
       apiKey,
       monthlyBudgetUsd: 0,
       error:
@@ -41,11 +62,12 @@ export function getSummaryConfig(
     };
   if (apiKey && /[\s\p{Cc}]/u.test(apiKey))
     return {
+      ...selectedModel,
       apiKey: null,
       monthlyBudgetUsd,
       error: "La clé OpenAI contient des caractères invalides.",
     };
-  return { apiKey, monthlyBudgetUsd, error: null };
+  return { apiKey, monthlyBudgetUsd, error: null, ...selectedModel };
 }
 
 const instructions = `Rédige un résumé factuel en français du texte disponible d'une publication de veille.
@@ -70,21 +92,27 @@ const format = {
 };
 
 export interface SummaryRequest {
-  model: typeof SUMMARY_MODEL;
+  model: SummaryModel;
   instructions: string;
   input: { role: "user"; content: string }[];
   text: { format: typeof format };
   max_output_tokens: number;
   store: false;
-  temperature: number;
+  temperature?: number;
   service_tier: "default";
+  reasoning?: { effort: "none" | "minimal" };
 }
 
 function clip(value: string, length: number) {
   return value.slice(0, length).replace(/[\uD800-\uDBFF]$/, "");
 }
 
-export function buildSummaryInput(article: SummaryInputArticle) {
+export function buildSummaryInput(
+  article: SummaryInputArticle,
+  model: SummaryModel = DEFAULT_SUMMARY_MODEL,
+) {
+  if (!isSummaryModel(model))
+    throw new SummaryRequestError("Modèle de résumé non pris en charge.", true);
   const content = article.text.trim();
   if (
     article.contentBasis === "metadata" ||
@@ -100,14 +128,17 @@ export function buildSummaryInput(article: SummaryInputArticle) {
     truncated: false,
   };
   const request: SummaryRequest = {
-    model: SUMMARY_MODEL,
+    model,
     instructions,
     input: [{ role: "user", content: JSON.stringify(source) }],
     text: { format },
     max_output_tokens: SUMMARY_MAX_OUTPUT_TOKENS,
     store: false,
-    temperature: 0.2,
+    ...(SUMMARY_MODELS[model].effort === "minimal" ? {} : { temperature: 0.2 }),
     service_tier: "default",
+    ...(SUMMARY_MODELS[model].effort
+      ? { reasoning: { effort: SUMMARY_MODELS[model].effort! } }
+      : {}),
   };
   const bytes = () => {
     request.input[0].content = JSON.stringify(source);
@@ -162,10 +193,17 @@ function tokenCount(value: unknown, max: number) {
   return value;
 }
 
-export function parseSummaryResult(value: unknown): SummaryResult {
+export function parseSummaryResult(
+  value: unknown,
+  expectedModel: SummaryModel = DEFAULT_SUMMARY_MODEL,
+): SummaryResult {
   try {
     const data = object(value);
-    if (data.model !== SUMMARY_MODEL || data.status !== "completed")
+    if (
+      !isSummaryModel(expectedModel) ||
+      data.model !== expectedModel ||
+      data.status !== "completed"
+    )
       throw new Error("Incomplete or unexpected response");
     const usage = object(data.usage);
     const inputTokens = tokenCount(
@@ -176,10 +214,38 @@ export function parseSummaryResult(value: unknown): SummaryResult {
       usage.output_tokens,
       SUMMARY_MAX_OUTPUT_TOKENS,
     );
+    const details =
+      usage.input_tokens_details === undefined
+        ? undefined
+        : object(usage.input_tokens_details);
+    const breakdown = {
+      ...(details?.cached_tokens !== undefined
+        ? { cachedInputTokens: tokenCount(details.cached_tokens, inputTokens) }
+        : {}),
+      ...(details?.cache_write_tokens !== undefined
+        ? {
+            cacheWriteTokens: tokenCount(
+              details.cache_write_tokens,
+              inputTokens,
+            ),
+          }
+        : {}),
+    };
+    summaryCostNanos({
+      model: expectedModel,
+      inputTokens,
+      outputTokens,
+      ...breakdown,
+    });
     if (!Array.isArray(data.output)) throw new Error("Missing output");
     const texts: string[] = [];
     for (const item of data.output) {
       const message = object(item);
+      if (
+        message.type === "reasoning" &&
+        SUMMARY_MODELS[expectedModel].reasoning
+      )
+        continue;
       if (message.type !== "message") throw new Error("Unexpected output");
       if (
         message.role !== "assistant" ||
@@ -218,9 +284,10 @@ export function parseSummaryResult(value: unknown): SummaryResult {
     return {
       outcome: result.outcome as SummaryResult["outcome"],
       text,
-      model: SUMMARY_MODEL,
+      model: expectedModel,
       inputTokens,
       outputTokens,
+      ...breakdown,
     };
   } catch (error) {
     if (error instanceof SummaryRequestError) throw error;
@@ -240,7 +307,12 @@ export async function callSummary(
   if (!apiKey || /[\s\p{Cc}]/u.test(apiKey))
     throw new SummaryRequestError("Clé OpenAI absente ou invalide.", true);
   if (
-    request.model !== SUMMARY_MODEL ||
+    !isSummaryModel(request.model) ||
+    (SUMMARY_MODELS[request.model].reasoning
+      ? request.reasoning?.effort !== SUMMARY_MODELS[request.model].effort
+      : request.reasoning !== undefined) ||
+    (SUMMARY_MODELS[request.model].effort === "minimal" &&
+      request.temperature !== undefined) ||
     request.max_output_tokens !== SUMMARY_MAX_OUTPUT_TOKENS ||
     request.store !== false ||
     request.service_tier !== "default" ||
@@ -294,7 +366,7 @@ export async function callSummary(
     } catch {
       throw new SummaryRequestError("Réponse OpenAI illisible.");
     }
-    return parseSummaryResult(data);
+    return parseSummaryResult(data, request.model);
   } catch (error) {
     if (error instanceof SummaryRequestError) throw error;
     throw new SummaryRequestError(

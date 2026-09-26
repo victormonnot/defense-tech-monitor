@@ -15,6 +15,8 @@ export interface SummaryResult {
   model: string;
   inputTokens: number;
   outputTokens: number;
+  cachedInputTokens?: number;
+  cacheWriteTokens?: number;
 }
 
 export interface ArticleSummary {

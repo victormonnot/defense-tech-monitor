@@ -1,14 +1,12 @@
 import { randomUUID } from "node:crypto";
+import { buildSummaryInput, getSummaryConfig } from "./summary-client";
 import {
-  buildSummaryInput,
-  getSummaryConfig,
-  SUMMARY_INPUT_NANODOLLARS_PER_TOKEN,
-  SUMMARY_MAX_INPUT_TOKENS,
-  SUMMARY_MAX_OUTPUT_TOKENS,
-  SUMMARY_MODEL,
-  SUMMARY_OUTPUT_NANODOLLARS_PER_TOKEN,
-  SUMMARY_RESERVED_NANODOLLARS,
-} from "./summary-client";
+  DEFAULT_SUMMARY_MODEL,
+  isSummaryModel,
+  summaryCostNanos,
+  summaryReservationNanos,
+  type SummaryModel,
+} from "./summary-models";
 import type { MonitorStore } from "./store";
 import type {
   ArticleSummary,
@@ -49,17 +47,23 @@ function configured(config: Config) {
   return (
     !!config.apiKey &&
     !config.error &&
+    (config.model === undefined || isSummaryModel(config.model)) &&
     Number.isFinite(config.monthlyBudgetUsd) &&
     config.monthlyBudgetUsd > 0 &&
     Number.isSafeInteger(Math.floor(config.monthlyBudgetUsd * 1e9))
   );
 }
+function selectedModel(config: Config): SummaryModel {
+  return isSummaryModel(config.model) ? config.model : DEFAULT_SUMMARY_MODEL;
+}
 function configurationReason(config: Config) {
   return (
     config.error ||
-    (!config.apiKey
-      ? "Configurez une clé OpenAI pour générer des résumés."
-      : "Configurez un plafond mensuel positif pour les résumés.")
+    (config.model !== undefined && !isSummaryModel(config.model)
+      ? "Le modèle de résumé configuré n’est pas pris en charge."
+      : !config.apiKey
+        ? "Configurez une clé OpenAI pour générer des résumés."
+        : "Configurez un plafond mensuel positif pour les résumés.")
   );
 }
 function budget(store: Store, currentMonth: string) {
@@ -108,26 +112,31 @@ export function summaryArticle(store: Store, id: string): SummaryInputArticle {
 function validResult(value: unknown): value is SummaryResult {
   if (!value || typeof value !== "object") return false;
   const result = value as SummaryResult;
-  return (
-    result.model === SUMMARY_MODEL &&
+  const valid =
+    isSummaryModel(result.model) &&
     (result.outcome === "summary" || result.outcome === "insufficient") &&
     typeof result.text === "string" &&
     (result.outcome === "summary"
       ? result.text.trim().length >= 20 && result.text.length <= 1000
       : result.text === "") &&
-    !/[\p{Cc}\u202a-\u202e\u2066-\u2069]/u.test(result.text) &&
-    Number.isSafeInteger(result.inputTokens) &&
-    result.inputTokens >= 0 &&
-    result.inputTokens <= SUMMARY_MAX_INPUT_TOKENS &&
-    Number.isSafeInteger(result.outputTokens) &&
-    result.outputTokens >= 0 &&
-    result.outputTokens <= SUMMARY_MAX_OUTPUT_TOKENS
-  );
+    !/[\p{Cc}\u202a-\u202e\u2066-\u2069]/u.test(result.text);
+  if (!valid) return false;
+  try {
+    summaryCostNanos(result);
+    return true;
+  } catch {
+    return false;
+  }
 }
-function cachedResult(row: CacheRow): SummaryResult | null {
+function cachedResult(
+  row: CacheRow,
+  expectedModel: SummaryModel,
+): SummaryResult | null {
   try {
     const parsed: unknown = JSON.parse(row.result ?? "null");
-    return validResult(parsed) ? parsed : null;
+    return validResult(parsed) && parsed.model === expectedModel
+      ? parsed
+      : null;
   } catch {
     return null;
   }
@@ -139,6 +148,7 @@ export function summarySnapshot(
   config: Config = getSummaryConfig(),
   now = Date.now(),
 ): { state: SummaryState; summaries: Map<string, ArticleSummary> } {
+  const model = selectedModel(config);
   const cache = new Map(
     (store.db.prepare("SELECT * FROM summary_cache").all() as CacheRow[]).map(
       (row) => [row.cache_key, row],
@@ -155,7 +165,7 @@ export function summarySnapshot(
       : 0;
   const insufficientBudget =
     Math.floor(safeBudget * 1e9) - totals.spent - totals.reserved <
-    SUMMARY_RESERVED_NANODOLLARS;
+    summaryReservationNanos(model);
   const block = !configured(config)
     ? configurationReason(config)
     : running
@@ -169,7 +179,7 @@ export function summarySnapshot(
     failed = 0,
     needsRequest = 0;
   for (const article of inputs) {
-    const input = buildSummaryInput(article);
+    const input = buildSummaryInput(article, model);
     if (!input) {
       summaries.set(article.id, {
         status: "insufficient",
@@ -180,7 +190,7 @@ export function summarySnapshot(
     }
     eligible++;
     const row = cache.get(input.cacheKey);
-    const result = row?.status === "success" ? cachedResult(row) : null;
+    const result = row?.status === "success" ? cachedResult(row, model) : null;
     if (result && row?.generated_at) {
       if (result.outcome === "summary") ready++;
       summaries.set(article.id, {
@@ -230,7 +240,7 @@ export function summarySnapshot(
     state: {
       configured: configured(config),
       configurationError: config.error,
-      model: SUMMARY_MODEL,
+      model,
       month: month(now),
       monthlyBudgetUsd: safeBudget,
       spentUsd: totals.spent / 1e9,
@@ -275,7 +285,8 @@ export function claimSummary(
   store.db.exec("BEGIN IMMEDIATE");
   try {
     recoverExpired(store, now);
-    const input = buildSummaryInput(summaryArticle(store, articleId));
+    const model = selectedModel(config);
+    const input = buildSummaryInput(summaryArticle(store, articleId), model);
     if (!input) {
       store.db.exec("COMMIT");
       return null;
@@ -285,7 +296,7 @@ export function claimSummary(
       .get(input.cacheKey) as CacheRow | undefined;
     if (
       existing &&
-      ((existing.status === "success" && cachedResult(existing)) ||
+      ((existing.status === "success" && cachedResult(existing, model)) ||
         existing.status === "running")
     ) {
       store.db.exec("COMMIT");
@@ -303,7 +314,7 @@ export function claimSummary(
       Math.floor(config.monthlyBudgetUsd * 1e9) -
         totals.spent -
         totals.reserved <
-      SUMMARY_RESERVED_NANODOLLARS
+      summaryReservationNanos(model)
     )
       throw new Error(budgetReason());
     const id = randomUUID();
@@ -315,7 +326,7 @@ export function claimSummary(
         id,
         input.cacheKey,
         month(now),
-        SUMMARY_RESERVED_NANODOLLARS,
+        summaryReservationNanos(model),
         new Date(now).toISOString(),
       );
     store.db
@@ -337,7 +348,8 @@ export function settleSummary(
   result: SummaryResult,
   now = Date.now(),
 ): boolean {
-  if (!validResult(result)) throw new Error("Réponse de résumé invalide.");
+  if (!validResult(result) || result.model !== claim.request.model)
+    throw new Error("Réponse de résumé invalide.");
   store.db.exec("BEGIN IMMEDIATE");
   try {
     if (
@@ -350,9 +362,7 @@ export function settleSummary(
       store.db.exec("COMMIT");
       return false;
     }
-    const cost =
-      result.inputTokens * SUMMARY_INPUT_NANODOLLARS_PER_TOKEN +
-      result.outputTokens * SUMMARY_OUTPUT_NANODOLLARS_PER_TOKEN;
+    const cost = summaryCostNanos(result);
     store.db
       .prepare(
         "UPDATE summary_attempts SET status='success',settled_nanos=?,input_tokens=?,output_tokens=?,finished_at=? WHERE id=? AND status='running'",
@@ -370,6 +380,12 @@ export function settleSummary(
       model: result.model,
       inputTokens: result.inputTokens,
       outputTokens: result.outputTokens,
+      ...(result.cachedInputTokens !== undefined
+        ? { cachedInputTokens: result.cachedInputTokens }
+        : {}),
+      ...(result.cacheWriteTokens !== undefined
+        ? { cacheWriteTokens: result.cacheWriteTokens }
+        : {}),
     };
     store.db
       .prepare(

@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import type { Article } from "@/lib/types";
 import type { SummaryState } from "@/lib/summary-types";
+import { isSummaryModel, SUMMARY_MODELS } from "@/lib/summary-models";
 
 function dollars(value: number) {
   return new Intl.NumberFormat("fr-FR", {
@@ -21,7 +22,7 @@ function dollars(value: number) {
 }
 
 function modelLabel(model?: string) {
-  return model?.startsWith("gpt-4.1-mini") ? "GPT-4.1 mini" : model;
+  return isSummaryModel(model) ? SUMMARY_MODELS[model].label : model;
 }
 
 function generatedDate(value?: string) {

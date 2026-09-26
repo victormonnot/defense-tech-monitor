@@ -15,6 +15,13 @@ import {
 } from "../src/lib/summary-client";
 import { processArticleSummary } from "../src/lib/summary-service";
 import {
+  DEFAULT_SUMMARY_MODEL,
+  SUMMARY_MODELS,
+  summaryCostNanos,
+  summaryReservationNanos,
+  type SummaryModel,
+} from "../src/lib/summary-models";
+import {
   claimSummary,
   failSummary,
   settleSummary,
@@ -539,4 +546,266 @@ test("invalid IDs and disabled configuration cannot create a ledger entry", asyn
       ?.count,
     0,
   );
+});
+
+test("each registered model has an isolated cache while previous default results remain reusable", async (t) => {
+  const store = storeFor(t);
+  const [article] = addArticles(store);
+  const models = Object.keys(SUMMARY_MODELS) as SummaryModel[];
+  let calls = 0;
+  let expectedSpent = 0;
+  for (const model of models) {
+    const currentConfig = { ...config, model };
+    assert.equal(
+      summarySnapshot(store, undefined, currentConfig, now).summaries.get(
+        article.id,
+      )?.status,
+      "available",
+    );
+    const response = { ...result, model };
+    const summary = await processArticleSummary(store, article.id, {
+      config: () => currentConfig,
+      now: () => now,
+      call: async (request) => {
+        calls++;
+        assert.equal(request.model, model);
+        return response;
+      },
+    });
+    expectedSpent += summaryCostNanos(response);
+    assert.equal(summary.status, "ready");
+    assert.equal(summary.model, model);
+    const current = summarySnapshot(store, undefined, currentConfig, now);
+    assert.equal(current.state.ready, 1);
+    assert.equal(current.state.model, model);
+    assert.equal(current.state.spentUsd, expectedSpent / 1e9);
+    assert.equal(current.state.reservedUsd, 0);
+  }
+  for (const model of models) {
+    const summary = await processArticleSummary(store, article.id, {
+      config: () => ({ ...config, model }),
+      now: () => now,
+      call: async () =>
+        assert.fail("Switching back must reuse the model's cache"),
+    });
+    assert.equal(summary.model, model);
+  }
+  const legacy = await processArticleSummary(store, article.id, {
+    config: () => config,
+    now: () => now,
+    call: async () =>
+      assert.fail("Configuration without model keeps the default cache"),
+  });
+  assert.equal(legacy.model, DEFAULT_SUMMARY_MODEL);
+  assert.equal(calls, models.length);
+  assert.equal(
+    store.db.prepare("SELECT COUNT(*) AS count FROM summary_cache").get()
+      ?.count,
+    models.length,
+  );
+  assert.equal(
+    store.db.prepare("SELECT COUNT(*) AS count FROM summary_attempts").get()
+      ?.count,
+    models.length,
+  );
+});
+
+test("model-specific reservation covers maximal cache-write and output costs", (t) => {
+  const store = storeFor(t);
+  const [article] = addArticles(store);
+  const reservations: Record<SummaryModel, number> = {
+    "gpt-4.1-mini-2025-04-14": 26_400_000,
+    "gpt-5-nano-2025-08-07": 3_400_000,
+    "gpt-5.6-luna": 16_600_000,
+    "gpt-6-luna": 8_250_000,
+  };
+  for (const model of Object.keys(reservations) as SummaryModel[]) {
+    const claim = claimSummary(store, article.id, { ...config, model }, now)!;
+    assert.equal(summaryReservationNanos(model), reservations[model]);
+    assert.equal(
+      store.db
+        .prepare("SELECT reserved_nanos FROM summary_attempts WHERE id=?")
+        .get(claim.id)?.reserved_nanos,
+      reservations[model],
+    );
+    assert.equal(
+      settleSummary(
+        store,
+        claim,
+        {
+          ...result,
+          model,
+          inputTokens: SUMMARY_MAX_INPUT_TOKENS,
+          outputTokens: SUMMARY_MAX_OUTPUT_TOKENS,
+          cachedInputTokens: 0,
+          cacheWriteTokens: SUMMARY_MAX_INPUT_TOKENS,
+        },
+        now,
+      ),
+      true,
+    );
+    assert.equal(
+      store.db
+        .prepare("SELECT settled_nanos FROM summary_attempts WHERE id=?")
+        .get(claim.id)?.settled_nanos,
+      reservations[model],
+    );
+  }
+});
+
+test("different models consume one shared monthly budget and a global in-flight lease", (t) => {
+  const store = storeFor(t);
+  const [a, b] = addArticles(store, 2);
+  const bounded = { ...config, monthlyBudgetUsd: 0.03 };
+  for (const model of ["gpt-6-luna", "gpt-5.6-luna"] as const) {
+    const currentConfig = { ...bounded, model };
+    const claim = claimSummary(store, a.id, currentConfig, now)!;
+    assert.throws(
+      () =>
+        claimSummary(
+          store,
+          b.id,
+          { ...bounded, model: DEFAULT_SUMMARY_MODEL },
+          now,
+        ),
+      /déjà en cours/,
+    );
+    settleSummary(
+      store,
+      claim,
+      {
+        ...result,
+        model,
+        inputTokens: SUMMARY_MAX_INPUT_TOKENS,
+        outputTokens: SUMMARY_MAX_OUTPUT_TOKENS,
+        cacheWriteTokens: SUMMARY_MAX_INPUT_TOKENS,
+      },
+      now,
+    );
+  }
+  const currentConfig = { ...bounded, model: "gpt-6-luna" as const };
+  const current = summarySnapshot(store, undefined, currentConfig, now);
+  assert.equal(current.state.spentUsd, 0.02485);
+  assert.equal(current.state.reservedUsd, 0);
+  assert.equal(current.state.budgetBlocked, true);
+  assert.equal(current.summaries.get(a.id)?.status, "ready");
+  assert.equal(current.summaries.get(b.id)?.canGenerate, false);
+  assert.throws(
+    () => claimSummary(store, b.id, currentConfig, now),
+    /budget mensuel/,
+  );
+  assert.equal(
+    store.db.prepare("SELECT COUNT(*) AS count FROM summary_attempts").get()
+      ?.count,
+    2,
+  );
+});
+
+test("cache-read and cache-write usage is charged precisely and missing write details are conservative", (t) => {
+  const store = storeFor(t);
+  const articles = addArticles(store, 3);
+  const model = "gpt-6-luna" as const;
+  const cases = [
+    {
+      usage: { cachedInputTokens: 400, cacheWriteTokens: 300 },
+      nanos: 121_500,
+    },
+    { usage: {}, nanos: 175_000 },
+    { usage: { cachedInputTokens: 300 }, nanos: 140_500 },
+  ];
+  for (const [index, fixture] of cases.entries()) {
+    const claim = claimSummary(
+      store,
+      articles[index].id,
+      { ...config, model },
+      now,
+    )!;
+    const response = {
+      ...result,
+      model,
+      ...fixture.usage,
+      rawBody: "must never persist",
+    };
+    settleSummary(store, claim, response, now);
+    const persisted = JSON.parse(
+      String(
+        store.db
+          .prepare("SELECT result FROM summary_cache WHERE cache_key=?")
+          .get(claim.cacheKey)?.result,
+      ),
+    );
+    assert.deepEqual(persisted, { ...result, model, ...fixture.usage });
+    assert.equal(
+      store.db
+        .prepare("SELECT settled_nanos FROM summary_attempts WHERE id=?")
+        .get(claim.id)?.settled_nanos,
+      fixture.nanos,
+    );
+  }
+  assert.equal(
+    summarySnapshot(store, undefined, { ...config, model }, now).state.spentUsd,
+    437_000 / 1e9,
+  );
+});
+
+test("settlement rejects the wrong model and invalid cache accounting without releasing the reservation", (t) => {
+  const store = storeFor(t);
+  const [article] = addArticles(store);
+  const model = "gpt-6-luna" as const;
+  const currentConfig = { ...config, model };
+  const claim = claimSummary(store, article.id, currentConfig, now)!;
+  for (const invalid of [
+    { ...result, model: "gpt-5.6-luna" },
+    { ...result, model: "unknown" },
+    { ...result, model, cachedInputTokens: 800, cacheWriteTokens: 201 },
+    { ...result, model, cachedInputTokens: -1 },
+    { ...result, model, cacheWriteTokens: 0.5 },
+  ]) {
+    assert.throws(() => settleSummary(store, claim, invalid, now), /invalide/);
+    const current = summarySnapshot(store, undefined, currentConfig, now);
+    assert.equal(current.state.spentUsd, 0);
+    assert.equal(current.state.reservedUsd, 0.00825);
+    assert.equal(current.summaries.get(article.id)?.status, "pending");
+  }
+  settleSummary(store, claim, { ...result, model }, now);
+  store.db
+    .prepare("UPDATE summary_cache SET result=? WHERE cache_key=?")
+    .run(JSON.stringify(result), claim.cacheKey);
+  const mismatched = summarySnapshot(store, undefined, currentConfig, now);
+  assert.equal(mismatched.state.ready, 0);
+  assert.equal(mismatched.summaries.get(article.id)?.status, "failed");
+  assert.equal(mismatched.summaries.get(article.id)?.text, undefined);
+});
+
+test("changing the configured model during a request keeps its result only in the original model's cache", async (t) => {
+  const store = storeFor(t);
+  const [article] = addArticles(store);
+  let model: SummaryModel = DEFAULT_SUMMARY_MODEL;
+  const pending = gate();
+  let calls = 0;
+  const request = processArticleSummary(store, article.id, {
+    config: () => ({ ...config, model }),
+    now: () => now,
+    call: async () => {
+      calls++;
+      await pending.wait;
+      return result;
+    },
+  });
+  model = "gpt-6-luna";
+  pending.release();
+  const returned = await request;
+  assert.equal(returned.status, "available");
+  assert.equal(returned.text, undefined);
+  assert.match(returned.reason ?? "", /modèle de résumé a changé/);
+  assert.equal(
+    summarySnapshot(store, undefined, { ...config, model }, now).state.ready,
+    0,
+  );
+  assert.equal(
+    state(store).summaries.get(article.id)?.model,
+    DEFAULT_SUMMARY_MODEL,
+  );
+  assert.equal(state(store).state.spentUsd, actualUsd);
+  assert.equal(calls, 1);
 });

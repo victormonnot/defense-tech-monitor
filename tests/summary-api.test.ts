@@ -3,6 +3,7 @@ import test from "node:test";
 import { NextRequest } from "next/server";
 import { GET, POST } from "../src/app/api/monitor/route";
 import { SUMMARY_MODEL } from "../src/lib/summary-client";
+import { DEFAULT_SUMMARY_MODEL } from "../src/lib/summary-models";
 import { MonitorStore } from "../src/lib/store";
 
 test("summary API checks origin, makes no GET calls and returns persisted failed states as errors", async (t) => {
@@ -14,9 +15,11 @@ test("summary API checks origin, makes no GET calls and returns persisted failed
   const previousFetch = globalThis.fetch;
   const previousKey = process.env.OPENAI_API_KEY;
   const previousBudget = process.env.DTM_SUMMARY_MONTHLY_BUDGET_USD;
+  const previousModel = process.env.DTM_SUMMARY_MODEL;
   globals.monitorStore = store;
   process.env.OPENAI_API_KEY = "synthetic-summary-api-key";
   process.env.DTM_SUMMARY_MONTHLY_BUDGET_USD = "3";
+  process.env.DTM_SUMMARY_MODEL = DEFAULT_SUMMARY_MODEL;
   t.after(() => {
     globals.monitorStore = previousStore;
     globalThis.fetch = previousFetch;
@@ -25,6 +28,8 @@ test("summary API checks origin, makes no GET calls and returns persisted failed
     if (previousBudget === undefined)
       delete process.env.DTM_SUMMARY_MONTHLY_BUDGET_USD;
     else process.env.DTM_SUMMARY_MONTHLY_BUDGET_USD = previousBudget;
+    if (previousModel === undefined) delete process.env.DTM_SUMMARY_MODEL;
+    else process.env.DTM_SUMMARY_MODEL = previousModel;
     store.db.close();
   });
   let calls = 0;

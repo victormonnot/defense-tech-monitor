@@ -116,17 +116,29 @@ Use **Résumer en français** on a publication to generate a short factual summa
 ```dotenv
 OPENAI_API_KEY=your_key_here
 DTM_SUMMARY_MONTHLY_BUDGET_USD=1
+DTM_SUMMARY_MODEL=gpt-6-luna
 ```
 
 The example cap can be replaced with your own limit from 0 to 100 USD, with at most two decimal places. The default is 0. A key and a positive cap are required; adding them does not start generation. Only an explicit summary request calls the provider. **Profil de veille** shows the configuration status and separate summary budget. The API key remains on the server.
 
-Generation sends the original title, source name, language, content provenance and collected text to the official OpenAI Responses endpoint. It does not send feed briefs, interests, feedback, folders or reading history. The integration uses the pinned `gpt-4.1-mini-2025-04-14` model, structured output, a maximum of 500 output tokens and `store: false`. See the [model documentation](https://developers.openai.com/api/docs/models/gpt-4.1-mini) and [structured output guide](https://developers.openai.com/api/docs/guides/structured-outputs).
+Generation sends the original title, source name, language, content provenance and collected text to the official OpenAI Responses endpoint. It does not send feed briefs, interests, feedback, folders or reading history. Requests use structured output, a maximum of 500 output tokens, standard processing and `store: false`. See the [structured output guide](https://developers.openai.com/api/docs/guides/structured-outputs).
+
+`DTM_SUMMARY_MODEL` accepts the following documented models. Unset configurations retain the original pinned GPT-4.1 mini model; the example above selects GPT-6 Luna. Unsupported model IDs are rejected before any paid request. Luna uses `reasoning.effort: none`, while GPT-5 nano uses `minimal`; its reasoning tokens count toward the output limit and cost. The original GPT-4.1 mini request has no reasoning parameter.
+
+| Model ID                                                                                | Standard input / 1M tokens | Output / 1M tokens | Maximum reserved per request |
+| --------------------------------------------------------------------------------------- | -------------------------: | -----------------: | ---------------------------: |
+| [`gpt-6-luna`](https://developers.openai.com/api/docs/models/gpt-6-luna)                |                      $0.10 |              $0.50 |                     $0.00825 |
+| [`gpt-5.6-luna`](https://developers.openai.com/api/docs/models/gpt-5.6-luna)            |                      $0.20 |              $1.20 |                      $0.0166 |
+| [`gpt-5-nano-2025-08-07`](https://developers.openai.com/api/docs/models/gpt-5-nano)     |                      $0.05 |              $0.40 |                      $0.0034 |
+| [`gpt-4.1-mini-2025-04-14`](https://developers.openai.com/api/docs/models/gpt-4.1-mini) |                      $0.40 |              $1.60 |                      $0.0264 |
+
+Rates were checked on September 26, 2026. The Luna model pages expose the listed IDs without a dated snapshot. Model choice affects price and generated content; changing it selects a separate cache and never starts generation automatically. Existing results and charges remain stored. All supported models share the same local summary budget.
 
 Metadata-only publications and texts shorter than 400 characters are ineligible. The model can also report that a longer text contains insufficient information. Requests are bounded to 32 KB of serialized JSON, shortening the body when necessary. Instructions require a short French paraphrase based only on the supplied text, preserving attribution and uncertainty. Source material is treated as untrusted data. Invalid, incomplete or refused outputs are not displayed as summaries. This is not claim verification, and the available text may be an excerpt rather than the complete article. Original titles, excerpts and source links remain available; the press review and its Markdown export continue to use source excerpts.
 
 A summary is cached across feeds. Changing feed settings, feedback or read/saved state does not regenerate it. Cache keys include the exact input, prompt and model; changing the source text or other transmitted fields makes the earlier result inapplicable. Old results never appear as summaries of a changed input. Reading pages and polling make no generation requests. A failed request can be retried explicitly from its article; there are no automatic retries.
 
-The local ledger tracks each request against the UTC month in which it started. At the documented standard rates of $0.40 per million input tokens and $1.60 per million output tokens, a transaction reserves $0.0264 before each request (64,000 input tokens and 500 output tokens). Valid responses settle that estimate with reported usage; input cache discounts are conservatively ignored. Failed or interrupted requests with unknown billing keep their reservation, including across retries and restarts. Known failures before HTTP cost nothing. Insufficient remaining budget blocks another request, while cached summaries remain readable. This cap is independent of Jev, your OpenAI balance and other applications; it is a local estimate at the documented rates, not an account-wide spending limit or billing statement.
+The local ledger tracks each request against the UTC month in which it started. A transaction reserves the selected model’s maximum 64,000-input-token and 500-output-token charge before HTTP, including the 1.25× input rate for possible Luna cache writes. Valid responses settle using reported input/output usage and cache-read/write counts. Missing cache-write counts are estimated at the highest applicable input rate; missing cache-read counts receive no discount. See OpenAI’s [cache accounting documentation](https://developers.openai.com/api/docs/guides/prompt-caching). Failed or interrupted requests with unknown billing keep their reservation, including across retries and restarts. Known failures before HTTP cost nothing. Insufficient remaining budget blocks another request, while cached summaries remain readable. This cap is independent of Jev, your OpenAI balance and other applications; it is a local estimate at the documented rates, not an account-wide spending limit or billing statement.
 
 ### Organizing publications
 
@@ -216,6 +228,7 @@ src/lib/jev-client.ts             Pinned TypeSafe requests, bounded inputs, vali
 src/lib/jev-store.ts              Cached decisions, transactional reservations, usage ledger
 src/lib/jev-worker.ts             Optional background classification and explicit recovery
 src/lib/summary-client.ts         Bounded OpenAI requests and source-based French summaries
+src/lib/summary-models.ts         Supported models, request settings, and token pricing
 src/lib/summary-store.ts          Summary cache, reservations, and separate usage ledger
 src/lib/summary-service.ts        On-demand generation and explicit retry
 src/lib/profile.ts                Profile validation and selection text scope

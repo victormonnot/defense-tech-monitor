@@ -13,6 +13,7 @@ import {
 } from "./summary-store";
 import type { MonitorStore } from "./store";
 import type { ArticleSummary } from "./summary-types";
+import { DEFAULT_SUMMARY_MODEL, isSummaryModel } from "./summary-models";
 
 export async function processArticleSummary(
   store: MonitorStore,
@@ -46,17 +47,23 @@ export async function processArticleSummary(
     }
   }
   const current = summaryArticle(store, articleId);
+  const currentConfig = getConfig();
   const summary = summarySnapshot(
     store,
     [current],
-    getConfig(),
+    currentConfig,
     now(),
   ).summaries.get(articleId)!;
-  if (claim && buildSummaryInput(current)?.cacheKey !== claim.cacheKey)
+  const model = isSummaryModel(currentConfig.model)
+    ? currentConfig.model
+    : DEFAULT_SUMMARY_MODEL;
+  if (claim && buildSummaryInput(current, model)?.cacheKey !== claim.cacheKey)
     return {
       ...summary,
       reason:
-        "Le contenu a changé pendant la demande. Le résumé précédent ne s’applique pas à cette version.",
+        model !== claim.request.model
+          ? "Le modèle de résumé a changé pendant la demande. Le résultat précédent reste associé à son modèle."
+          : "Le contenu a changé pendant la demande. Le résumé précédent ne s’applique pas à cette version.",
     };
   return summary;
 }

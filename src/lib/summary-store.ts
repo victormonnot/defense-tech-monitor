@@ -79,7 +79,7 @@ function budgetReason() {
 function rawInputs(store: Store): SummaryInputArticle[] {
   return store.db
     .prepare(
-      "SELECT a.id,a.title,a.text,a.language,a.content_basis,s.name AS source_name FROM articles a JOIN sources s ON s.id=a.source_id ORDER BY a.id",
+      "SELECT a.id,a.title,a.text,a.language,a.content_basis,s.name AS source_name FROM article_inputs a JOIN sources s ON s.id=a.source_id ORDER BY a.id",
     )
     .all()
     .map((row) => ({
@@ -96,7 +96,7 @@ export function summaryArticle(store: Store, id: string): SummaryInputArticle {
     throw new Error("Publication inconnue.");
   const row = store.db
     .prepare(
-      "SELECT a.id,a.title,a.text,a.language,a.content_basis,s.name AS source_name FROM articles a JOIN sources s ON s.id=a.source_id WHERE a.id=?",
+      "SELECT a.id,a.title,a.text,a.language,a.content_basis,s.name AS source_name FROM article_inputs a JOIN sources s ON s.id=a.source_id WHERE a.id=?",
     )
     .get(id);
   if (!row) throw new Error("Publication inconnue.");

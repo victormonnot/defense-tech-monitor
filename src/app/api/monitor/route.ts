@@ -166,7 +166,7 @@ export async function POST(request: NextRequest) {
       }
       case "collect": {
         const result = await collectSources(store);
-        message = `${result.added} nouvelle(s) publication(s), ${result.updated} mise(s) à jour. ${result.checked} source(s) consultée(s)${result.failed ? `, ${result.failed} en erreur` : ""}. ${result.skipped ? "Les sources désactivées, sans connecteur ou consultées récemment sont ignorées." : ""}`;
+        message = `${result.added} nouvelle(s) publication(s), ${result.updated} mise(s) à jour. ${result.checked} source(s) consultée(s)${result.failed ? `, ${result.failed} en erreur` : ""}. ${result.contentChecked ? `${result.contentUpdated ?? 0} texte(s) enrichi(s) sur ${result.contentChecked} page(s), ${result.contentFailed ?? 0} sans nouveau texte. ` : ""}${result.skipped ? "Les listes des sources désactivées, sans connecteur ou consultées récemment sont ignorées." : ""}`;
         break;
       }
       case "addSource": {

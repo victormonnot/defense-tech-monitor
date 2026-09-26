@@ -445,9 +445,11 @@ function ReviewEntry({ entry }: { entry: DigestEntry }) {
       {article.excerpt && article.contentBasis !== "metadata" ? (
         <div className="digest-excerpt">
           <span>
-            {article.contentBasis === "page_excerpt"
-              ? "Extrait de la page"
-              : "Extrait du flux"}
+            {article.contentBasis === "page_text"
+              ? "Extrait de l’article"
+              : article.contentBasis === "page_excerpt"
+                ? "Extrait de la page"
+                : "Extrait du flux"}
           </span>
           <p>{article.excerpt}</p>
         </div>

@@ -213,7 +213,7 @@ function budget(store: Store, currentMonth: string) {
 function rawInputs(store: Store): JevArticleInput[] {
   return store.db
     .prepare(
-      "SELECT id,title,text,excerpt,language,content_basis FROM articles ORDER BY COALESCE(updated_at,collected_at) DESC,id",
+      "SELECT id,title,text,excerpt,language,content_basis FROM article_inputs ORDER BY COALESCE(updated_at,collected_at) DESC,id",
     )
     .all()
     .map((row) => ({

@@ -190,9 +190,11 @@ export function ArticleSummaryPanel({
           <p>
             {article.contentBasis === "feed_text"
               ? "Texte fourni par le flux."
-              : article.contentBasis === "page_excerpt"
-                ? "Extrait de la page publique."
-                : "Informations disponibles dans la publication collectée."}
+              : article.contentBasis === "page_text"
+                ? "Texte extrait de la page publique de l’article."
+                : article.contentBasis === "page_excerpt"
+                  ? "Extrait de la page publique."
+                  : "Informations disponibles dans la publication collectée."}
             {summary.truncated &&
               " Le texte transmis a été raccourci pour le résumé."}{" "}
             Le contenu intégral de l’article n’est pas nécessairement

@@ -244,7 +244,7 @@ export function finishCollection(
     const status =
       error || (result.failed > 0 && result.failed === result.checked)
         ? "failed"
-        : result.failed > 0
+        : result.failed > 0 || (result.contentFailed ?? 0) > 0
           ? "partial"
           : "success";
     db.prepare(

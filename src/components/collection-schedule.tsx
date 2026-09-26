@@ -182,6 +182,10 @@ export function CollectionSchedule({
                 ` · ${lastRun.result.failed} en erreur`}
               {lastRun.result.skipped > 0 &&
                 ` · ${lastRun.result.skipped} ignorée${lastRun.result.skipped > 1 ? "s" : ""}`}
+              {!!lastRun.result.contentChecked &&
+                ` · ${lastRun.result.contentUpdated ?? 0} texte(s) enrichi(s) sur ${lastRun.result.contentChecked} page(s) consultée(s)`}
+              {!!lastRun.result.contentFailed &&
+                ` · ${lastRun.result.contentFailed} texte(s) non récupéré(s)`}
             </p>
           )}
           {lastRun.error && <p className="schedule-error">{lastRun.error}</p>}

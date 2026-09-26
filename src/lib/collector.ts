@@ -2,6 +2,7 @@ import { discoverFeed } from "./feed";
 import { resolveCollection } from "./connectors";
 import { fetchResource, type HttpResult } from "./network";
 import { getStore, type MonitorStore } from "./store";
+import { collectArticleContent } from "./article-content-collector";
 import {
   COLLECTION_HEARTBEAT_MS,
   CollectionLeaseError,
@@ -17,6 +18,7 @@ class SourceChangedError extends Error {}
 export type FetchResource = (
   url: string,
   headers?: Record<string, string>,
+  acceptUrl?: (url: string) => boolean,
 ) => Promise<HttpResult>;
 
 export async function discoverSource(
@@ -233,6 +235,50 @@ async function runCollection(
           throw writeError;
         }
         result.failed++;
+      }
+    }
+    // Fill the backlog even when the listing is unchanged (304) or was checked
+    // recently. Article pages have their own cache and retry schedule.
+    const contentDeadline = Date.now() + 30000;
+    for (const source of store.sources()) {
+      if (!source.enabled || source.collectionKind !== "website") continue;
+      if ((result.contentChecked ?? 0) >= 20 || Date.now() >= contentDeadline)
+        break;
+      const guard = () => {
+        assertLease();
+        const current = store.db
+          .prepare(
+            "SELECT enabled,site_url,feed_url,language FROM sources WHERE id=?",
+          )
+          .get(source.id);
+        if (
+          !current?.enabled ||
+          current.site_url !== source.siteUrl ||
+          current.feed_url !== source.feedUrl ||
+          current.language !== source.language
+        )
+          throw new SourceChangedError();
+      };
+      try {
+        await collectArticleContent(
+          store,
+          source,
+          fetcher,
+          guard,
+          now,
+          contentDeadline,
+          20 - (result.contentChecked ?? 0),
+          (delta) => {
+            result.contentChecked =
+              (result.contentChecked ?? 0) + delta.checked;
+            result.contentUpdated =
+              (result.contentUpdated ?? 0) + delta.updated;
+            result.contentFailed = (result.contentFailed ?? 0) + delta.failed;
+          },
+        );
+      } catch (error) {
+        if (error instanceof SourceChangedError) continue;
+        throw error;
       }
     }
     finishCollection(store.db, owner, result, null, now());

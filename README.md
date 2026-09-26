@@ -2,7 +2,7 @@
 
 A personal monitoring application for following developments in drones, robotics, and defense technology from sources you choose.
 
-Publications are collected through RSS/Atom or dedicated public-page connectors, stored locally, and selected using an editable keyword profile or Jev-powered feeds with individual written briefs. Each publication retains its original title, source, language, and link. The interface distinguishes feed text, public-page excerpts, and titles with metadata only.
+Publications are collected through RSS/Atom or dedicated public-page connectors, stored locally, and selected using an editable keyword profile or Jev-powered feeds with individual written briefs. Each publication retains its original title, source, language, and link. The interface distinguishes feed text, article-page text, listing excerpts, and titles with metadata only.
 
 ## Getting started
 
@@ -162,7 +162,7 @@ The evaluation view includes all unjudged publications, including those outside 
 
 Precision is the share of judged rule matches marked relevant. Recall is the share of publications you marked relevant that the rules would select. These figures describe only your judged sample, not the entire feed or the reliability of any claim. Unknown ratios are shown as unavailable; already-seen feedback is counted separately and supplies no relevance label.
 
-The default selection scope remains **All collected text**, including feed text beyond the displayed excerpt. You can instead choose **Title and available excerpt** to reduce matches caused by incidental body mentions. This can also remove useful matches; missing excerpts are never reconstructed from article bodies, and title-only sources still use their titles. Topic labels and optional Jev requests use the same selected scope. Neither scope downloads additional content.
+The default selection scope remains **All collected text**, including feed text beyond the displayed excerpt. You can instead choose **Title and available excerpt** to reduce matches caused by incidental body mentions. This can also remove useful matches; title-only publications still use their titles. Topic labels and optional Jev requests use the same selected scope. Neither scope downloads additional content.
 
 Use **Preview changes — Prévisualiser les changements** to compare a draft profile with the saved one. The preview shows selection counts, entering/leaving publications, and changes to rule mistakes on existing judgments. It uses the same classification and feedback rules as saving, but does not write the profile, articles, or personal state. Editing the draft or changing article data invalidates the preview. **Save profile — Enregistrer mon profil** applies the changes explicitly.
 
@@ -178,12 +178,12 @@ Use **Keep separate — Conserver séparé** to exclude a publication from autom
 
 The four initial sources are defined in [`config/sources.json`](config/sources.json) and seeded into the database on first launch. Existing database entries are not overwritten by this file. Sources added through the interface remain in the local database.
 
-| Source                                                              | Collection method                                    | Available content                                                                |
-| ------------------------------------------------------------------- | ---------------------------------------------------- | -------------------------------------------------------------------------------- |
-| [Ukraine’s Arms Monitor](https://ukrainesarmsmonitor.substack.com/) | [RSS](https://ukrainesarmsmonitor.substack.com/feed) | Text provided by the feed                                                        |
-| [Militarnyi](https://militarnyi.com/en/)                            | [English RSS](https://militarnyi.com/en/news/feed/)  | Text provided by the feed                                                        |
-| [Brave1](https://brave1.gov.ua/en)                                  | Dedicated connector for its English public listing   | Titles, dates when provided, and original links; no article excerpts             |
-| [Defender Media](https://thedefender.media/en/)                     | Dedicated connector for its English public listing   | Titles, dates when provided, original links, and excerpts from publication cards |
+| Source                                                              | Collection method                                    | Available content                                                           |
+| ------------------------------------------------------------------- | ---------------------------------------------------- | --------------------------------------------------------------------------- |
+| [Ukraine’s Arms Monitor](https://ukrainesarmsmonitor.substack.com/) | [RSS](https://ukrainesarmsmonitor.substack.com/feed) | Text provided by the feed                                                   |
+| [Militarnyi](https://militarnyi.com/en/)                            | [English RSS](https://militarnyi.com/en/news/feed/)  | Text provided by the feed                                                   |
+| [Brave1](https://brave1.gov.ua/en)                                  | Dedicated connector for its English public listing   | Titles, dates, links, and public article text when extraction succeeds      |
+| [Defender Media](https://thedefender.media/en/)                     | Dedicated connector for its English public listing   | Titles, dates, links, card excerpts, and public article text when available |
 
 To add a source, enter its name and website under **Sources**. Brave1 and Defender Media are recognized automatically and do not require a feed URL. For other websites, the application looks for an RSS/Atom link explicitly advertised by the page; you can also provide a feed URL directly. Failure to discover a feed does not mean the website has stopped publishing.
 
@@ -191,7 +191,11 @@ Use **Edit — Modifier** on a source card to update its name, feed URL, or lang
 
 Disabling a source prevents pending requests from starting. If its feed URL, language, or activation changes during a request, the stale response is discarded. Such a request counts as both checked and skipped in the run outcome. Renaming a source preserves its cache and collected data.
 
-Each public-page connector reads one English listing page per collection: [Brave1 news](https://brave1.gov.ua/en/news) or [Defender Media](https://thedefender.media/en/). It does not follow pagination, import the full archive, or open individual article pages. The source card links to the page or feed used for collection. Website structure changes can interrupt extraction; check the collection status and any reported errors before assuming that a source has stopped publishing.
+Each public-page connector reads one English listing page per collection: [Brave1 news](https://brave1.gov.ua/en/news) or [Defender Media](https://thedefender.media/en/). It does not follow pagination or import the full archive. After reading the listings, it enriches known English articles from these two sites using their public article pages. The source card links to the page or feed used for collection. Website structure changes can interrupt extraction; check the collection status and any reported errors before assuming that a source has stopped publishing.
+
+Article retrieval is bounded to 10 pages per source and 20 pages per collection, with a 30-second soft time allowance checked between requests. Unvisited articles take priority; further collections continue the backlog, even if a listing returns HTTP 304 or was checked recently. Successful pages are checked again after seven days using HTTP validators when available. Failed or unrecognized pages wait one day before another collection can retry. **Sources** shows available, pending, and unsuccessful retrieval counts; the latest collection also reports pages checked and texts enriched.
+
+Retrieval uses the same public-address validation, request size limits, timeouts, and robots.txt checks as source collection, and rejects redirects to a different article. It sends no account cookies or API credentials and does not unlock subscriber content. The original feed/listing data is preserved separately. A temporary failure keeps the last successfully retrieved text; changed article URLs or languages cannot reuse an old page body. Updates preserve reading states, folders and feedback, but invalidate analyses and summaries based on older input. Enabled Jev feeds may therefore require new analyses within their existing budget; French summaries remain on demand.
 
 Collection respects `robots.txt`, limits response size, applies timeouts, and validates network destinations, including redirects. Failed sources retain previously collected articles and display their errors. Conditional HTTP requests (`ETag`, `Last-Modified`) and content hashes reduce repeated processing.
 
@@ -199,14 +203,14 @@ Collection respects `robots.txt`, limits response size, applies timeouts, and va
 
 - Displayed publications come from real feeds and supported public pages. Only tests use synthetic data.
 - Publication and collection timestamps are separate. Unknown publication dates remain unknown.
-- Available feed text is analyzed up to a limit of 20,000 characters and is not necessarily the complete article. Public-page connectors use only the content available in listing cards: Brave1 provides metadata only, while Defender Media also provides card excerpts. The interface identifies the content used for analysis and displays excerpts of up to 400 characters; the API does not expose the stored article body. Metadata-only publications have no excerpt or generated summary.
+- Available feed and article-page text is analyzed up to a limit of 20,000 characters and is not necessarily the complete article. Article extraction is restricted to recognized public editorial elements; scripts, embedded data bodies, menus, recommendations, and explicit access restrictions are excluded. When extraction is unavailable, the listing title and any original excerpt remain usable. The interface identifies the content used for analysis and displays excerpts of up to 400 characters; the API does not expose the stored article body. Metadata-only publications have no excerpt or generated summary.
 - Full articles are not republished. The application does not bypass paywalls, transcribe videos, or invent summaries from titles.
 - Classification defaults to deterministic keyword rules, with limitations around synonyms and languages. Optional Jev results supplement selection and editorial labels; theme tags remain rule-based. Matches indicate relevance to a profile, never the reliability of a claim.
 - Repeated imports of a publication from the same source are detected through its identifier or normalized URL. Cross-source grouping requires the same known language, publication dates no more than seven days apart, and matching ordered title words after typographic normalization, including specific terms beyond generic defense vocabulary. When text is available, all collected text must also match in word order, not just the displayed excerpt. All members must match each other; a chain of loosely related articles is insufficient. Missing dates, different languages, changed numbers, follow-up signals, and different or incomplete text prevent grouping. Weaker title matches remain separate with comparison hints. This favors missed matches over hiding new information. It does not translate titles, fetch additional article bodies, or verify claims.
 - This version does not include exhaustive archive imports, alerts, or audio.
 - The database and `.env` files are excluded from Git. The example configuration contains no secrets. To back up local data, stop the application and copy the `data/` directory.
 
-Existing databases are upgraded automatically to schema version 9 when opened. Migrations add content provenance, a per-publication grouping preference, revision-based change tracking, folder storage, collection scheduling, optional Jev cache/accounting, editable feeds with independent feedback, and a separate summary cache and usage ledger while preserving existing publications and personal state. Groups are derived from the current publications; they do not merge or delete database records.
+Existing databases are upgraded automatically to schema version 10 when opened. Migrations add content provenance, a per-publication grouping preference, revision-based change tracking, folder storage, collection scheduling, optional Jev cache/accounting, editable feeds with independent feedback, a separate summary cache and usage ledger, and an article-page content cache while preserving existing publications and personal state. Groups are derived from the current publications; they do not merge or delete database records.
 
 ## Architecture
 
@@ -215,7 +219,9 @@ A [Next.js](https://nextjs.org/docs) monolith with React and TypeScript serves t
 ```text
 src/lib/network.ts                HTTP, allowed destinations, and robots.txt
 src/lib/feed.ts                   RSS/Atom discovery and normalization
-src/lib/connectors/               Brave1 and Defender Media public-page extraction
+src/lib/connectors/               Brave1 and Defender Media listing/article extraction
+src/lib/article-content-collector.ts Bounded article retrieval and conditional refresh
+src/lib/article-content-store.ts  Public text cache without overwriting listing data
 src/lib/collector.ts              Collection, caching, and run outcomes
 src/lib/collection-state.ts       Run ownership, scheduling, and latest outcome
 src/lib/collection-scheduler.ts   Local automatic collection worker

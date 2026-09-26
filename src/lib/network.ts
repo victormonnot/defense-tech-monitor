@@ -184,6 +184,11 @@ async function respectRobots(input: string) {
 export async function fetchResource(
   input: string,
   headers: Record<string, string> = {},
+  acceptUrl?: (url: string) => boolean,
 ) {
-  return safeFetch(input, headers, respectRobots);
+  return safeFetch(input, headers, async (url) => {
+    if (acceptUrl && !acceptUrl(url))
+      throw new Error("La page a redirigé vers une autre publication.");
+    await respectRobots(url);
+  });
 }

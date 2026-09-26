@@ -14,7 +14,7 @@ const defender = `<article class="one-news">
   <a class="excerpt-link" href="/en/2026/09/fixture-robot/"><p>Synthetic excerpt about robot navigation.</p></a>
 </article>`;
 
-test("website connectors collect one page each and persist truthful provenance without duplicate imports", async (t) => {
+test("website connectors keep truthful listing data when article pages cannot be extracted", async (t) => {
   const store = new MonitorStore(":memory:", false);
   t.after(() => store.db.close());
   const braveId = store.addSource({
@@ -43,6 +43,8 @@ test("website connectors collect one page each and persist truthful provenance w
   assert.deepEqual(requests, [
     "https://brave1.gov.ua/en/news",
     "https://thedefender.media/en/",
+    "https://brave1.gov.ua/en/news/fixture-robot",
+    "https://thedefender.media/en/2026/09/fixture-robot/",
   ]);
   const snapshot = store.snapshot();
   assert.ok(

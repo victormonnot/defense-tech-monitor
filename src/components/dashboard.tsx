@@ -1469,6 +1469,17 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                             {source.enabled ? "Active" : "Désactivée"}
                           </span>
                         </div>
+                        {source.content && (
+                          <p className="schedule-help">
+                            Texte des articles : {source.content.available}{" "}
+                            disponible(s)
+                            {` · ${source.content.pending} à récupérer`}
+                            {source.content.failed > 0 &&
+                              ` · ${source.content.failed} dernière(s) tentative(s) sans nouveau texte`}
+                            . La collecte enrichit progressivement les pages
+                            publiques reconnues.
+                          </p>
+                        )}
                         {source.lastError && (
                           <p className="source-error">
                             <CircleAlert size={15} />
@@ -1912,8 +1923,9 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                     précise l’origine du contenu disponible : texte du flux,
                     extrait d’une page publique, ou titre uniquement. Le texte
                     des flux est limité à 20 000 caractères. Les connecteurs de
-                    pages publiques consultent une seule page anglaise par
-                    source et par collecte, sans ouvrir le corps des articles.
+                    pages publiques lisent aussi le texte des articles Brave1 et
+                    Defender Media, par lots limités. Seul le contenu public
+                    reconnu est conservé, dans la limite de 20 000 caractères.
                   </p>
                   <p>
                     « Pertinent » retient la publication dans Pour moi, même
@@ -2368,9 +2380,11 @@ function ArticleCard({
         {article.excerpt && article.contentBasis !== "metadata" && (
           <div className="article-excerpt">
             <span>
-              {article.contentBasis === "page_excerpt"
-                ? "Extrait de la page"
-                : "Extrait du flux"}
+              {article.contentBasis === "page_text"
+                ? "Extrait de l’article"
+                : article.contentBasis === "page_excerpt"
+                  ? "Extrait de la page"
+                  : "Extrait du flux"}
             </span>
             <p>
               {article.excerpt.length > 400
@@ -2400,9 +2414,11 @@ function ArticleCard({
                   : "Titre seul utilisé par les règles"
                 : article.contentBasis === "feed_text"
                   ? "Texte du flux utilisé par les règles"
-                  : article.contentBasis === "page_excerpt"
-                    ? "Extrait de la page utilisé par les règles"
-                    : "Titre seul utilisé par les règles"}
+                  : article.contentBasis === "page_text"
+                    ? "Texte de l’article utilisé par les règles"
+                    : article.contentBasis === "page_excerpt"
+                      ? "Extrait de la page utilisé par les règles"
+                      : "Titre seul utilisé par les règles"}
             </span>
             {article.reasons.length > 0 && (
               <details>

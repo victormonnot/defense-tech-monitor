@@ -1,7 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { GENERAL_FEED, GENERAL_FEED_ID } from "./custom-feeds";
 
-const CURRENT_VERSION = 9;
+const CURRENT_VERSION = 10;
 
 export function migrate(db: DatabaseSync) {
   db.exec("BEGIN IMMEDIATE");
@@ -161,6 +161,29 @@ export function migrate(db: DatabaseSync) {
           lease_expires_at TEXT, result TEXT, generated_at TEXT, error TEXT
         );
         PRAGMA user_version = 9;
+      `);
+    }
+    if (version < 10) {
+      db.exec(`
+        CREATE TABLE article_content (
+          article_id TEXT PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,
+          url TEXT NOT NULL, language TEXT NOT NULL, text TEXT,
+          retrieved_at TEXT, checked_at TEXT NOT NULL, next_attempt_at TEXT NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('success','unavailable','error')),
+          error TEXT, etag TEXT, last_modified TEXT
+        );
+        CREATE VIEW article_inputs AS
+          SELECT a.id,a.source_id,a.guid,a.url,a.title,a.published_at,a.collected_at,
+            CASE WHEN c.text IS NOT NULL AND c.url=a.url AND c.language=a.language
+              THEN c.text ELSE a.text END AS text,
+            CASE WHEN c.text IS NOT NULL AND c.url=a.url AND c.language=a.language
+              THEN substr(c.text,1,480) ELSE a.excerpt END AS excerpt,
+            a.language,a.format,a.content_hash,a.is_read,a.saved,a.feedback,
+            CASE WHEN c.text IS NOT NULL AND c.url=a.url AND c.language=a.language
+              THEN 'page_text' ELSE a.content_basis END AS content_basis,
+            a.keep_separate,a.revision,a.reviewed_revision,a.updated_at
+          FROM articles a LEFT JOIN article_content c ON c.article_id=a.id;
+        PRAGMA user_version = 10;
       `);
     }
     db.exec("COMMIT");

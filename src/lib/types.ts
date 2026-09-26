@@ -5,7 +5,11 @@ import type { ArticleSummary, SummaryState } from "./summary-types";
 
 export type Feedback = "relevant" | "off_topic" | "seen";
 export type SourceStatus = "pending" | "ok" | "empty" | "error" | "unsupported";
-export type ContentBasis = "feed_text" | "page_excerpt" | "metadata";
+export type ContentBasis =
+  | "feed_text"
+  | "page_excerpt"
+  | "page_text"
+  | "metadata";
 
 export interface Source {
   id: string;
@@ -21,6 +25,7 @@ export interface Source {
   lastSuccessAt: string | null;
   lastError: string | null;
   articleCount: number;
+  content?: { available: number; pending: number; failed: number };
 }
 
 export interface Article {
@@ -95,6 +100,9 @@ export interface CollectionResult {
   failed: number;
   skipped: number;
   checked: number;
+  contentChecked?: number;
+  contentUpdated?: number;
+  contentFailed?: number;
 }
 
 export interface CollectionRun {

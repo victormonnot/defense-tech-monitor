@@ -22,6 +22,7 @@ import {
 } from "./jev-store";
 import type { FeedInput } from "./custom-feeds";
 import { summarySnapshot } from "./summary-store";
+import { articleContentTarget } from "./article-content";
 import type {
   ActivityReview,
   Article,
@@ -109,6 +110,39 @@ export class MonitorStore {
         "SELECT s.*, (SELECT COUNT(*) FROM articles a WHERE a.source_id=s.id) AS article_count FROM sources s ORDER BY s.name COLLATE NOCASE",
       )
       .all() as Row[];
+    const sourceRows = new Map(rows.map((row) => [String(row.id), row]));
+    const contentCounts = new Map<string, NonNullable<Source["content"]>>();
+    for (const article of this.db
+      .prepare(
+        `
+        SELECT a.source_id,a.url,c.status,c.text IS NOT NULL AS available
+        FROM articles a LEFT JOIN article_content c
+          ON c.article_id=a.id AND c.url=a.url AND c.language=a.language
+        WHERE a.format='article' AND a.language='en'
+      `,
+      )
+      .all()) {
+      const source = sourceRows.get(String(article.source_id));
+      if (
+        !source ||
+        !articleContentTarget(
+          String(source.site_url),
+          source.feed_url as string | null,
+          String(article.url),
+        )
+      )
+        continue;
+      const counts = contentCounts.get(String(article.source_id)) ?? {
+        available: 0,
+        pending: 0,
+        failed: 0,
+      };
+      if (article.available) counts.available++;
+      if (article.status === null) counts.pending++;
+      if (article.status === "error" || article.status === "unavailable")
+        counts.failed++;
+      contentCounts.set(String(article.source_id), counts);
+    }
     return rows.map((r) => ({
       id: String(r.id),
       name: String(r.name),
@@ -127,6 +161,16 @@ export class MonitorStore {
       lastSuccessAt: r.last_success_at as string | null,
       lastError: r.last_error as string | null,
       articleCount: Number(r.article_count),
+      ...(resolveCollection(String(r.site_url), r.feed_url as string | null)
+        ?.kind === "website"
+        ? {
+            content: contentCounts.get(String(r.id)) ?? {
+              available: 0,
+              pending: 0,
+              failed: 0,
+            },
+          }
+        : {}),
     }));
   }
 
@@ -547,7 +591,7 @@ export class MonitorStore {
       assigned.sort((a, b) => folderOrder.get(a)! - folderOrder.get(b)!);
     const rows = this.db
       .prepare(
-        "SELECT a.*,s.name AS source_name FROM articles a JOIN sources s ON s.id=a.source_id ORDER BY COALESCE(a.published_at,a.collected_at) DESC",
+        "SELECT a.*,s.name AS source_name FROM article_inputs a JOIN sources s ON s.id=a.source_id ORDER BY COALESCE(a.published_at,a.collected_at) DESC",
       )
       .all() as Row[];
     const jev = jevSnapshot(

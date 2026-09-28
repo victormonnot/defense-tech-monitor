@@ -23,6 +23,8 @@ import {
 import type { FeedInput } from "./custom-feeds";
 import { summarySnapshot } from "./summary-store";
 import { articleContentTarget } from "./article-content";
+import { xSnapshot } from "./x-store";
+import { parseXAccount } from "./x-client";
 import type {
   ActivityReview,
   Article,
@@ -198,6 +200,8 @@ export class MonitorStore {
     feedUrl: string | null;
     language: string;
   }) {
+    const account = parseXAccount(input.siteUrl);
+    if (account && !input.feedUrl) input = { ...input, siteUrl: account.url };
     const supported = !!resolveCollection(input.siteUrl, input.feedUrl);
     const existing = this.db
       .prepare("SELECT id,feed_url,language FROM sources WHERE site_url=?")
@@ -694,6 +698,7 @@ export class MonitorStore {
       jev: jev.state,
       customFeeds: jev.feeds,
       summaries: summaries.state,
+      x: xSnapshot(this.db),
       activity: {
         startedAt: String(
           this.db

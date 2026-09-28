@@ -113,10 +113,10 @@ export function digestMarkdown(digest: Digest): string {
         lines.push(
           `${grouped ? "####" : "###"} ${url ? `[${title}](<${url.replace(/&/g, "&amp;")}>)` : title}`,
           "",
-          `- Source : ${literal(article.sourceName)} · Langue : ${literal(article.language)} · Format : ${article.format === "video" ? "vidéo" : "article"}.`,
+          `- Source : ${literal(article.sourceName)} · Langue : ${literal(article.language)} · Format : ${article.format === "post" ? "publication X" : article.format === "video" ? "vidéo" : "article"}.`,
           `- Date de publication : ${timestamp(article.publishedAt)}.`,
           `- ${entry.kind === "new" ? "Première collecte" : "Données collectées actualisées"} : ${timestamp(entry.detectedAt)}.`,
-          `- Contenu disponible : ${article.contentBasis === "feed_text" ? "texte fourni par le flux" : article.contentBasis === "page_text" ? "texte extrait de la page de l’article" : article.contentBasis === "page_excerpt" ? "extrait de la page publique" : "titre et métadonnées uniquement"}.`,
+          `- Contenu disponible : ${article.format === "post" ? "texte publié sur X" : article.contentBasis === "feed_text" ? "texte fourni par le flux" : article.contentBasis === "page_text" ? "texte extrait de la page de l’article" : article.contentBasis === "page_excerpt" ? "extrait de la page publique" : "titre et métadonnées uniquement"}.`,
         );
         if (article.themes.length)
           lines.push(`- Thèmes : ${article.themes.map(literal).join(", ")}.`);
@@ -124,7 +124,7 @@ export function digestMarkdown(digest: Digest): string {
         if (article.excerpt && article.contentBasis !== "metadata") {
           lines.push(
             "",
-            `**${article.contentBasis === "feed_text" ? "Extrait du flux" : article.contentBasis === "page_text" ? "Extrait de l’article" : "Extrait de la page"} :** ${literal(article.excerpt)}`,
+            `**${article.format === "post" ? "Publication X" : article.contentBasis === "feed_text" ? "Extrait du flux" : article.contentBasis === "page_text" ? "Extrait de l’article" : "Extrait de la page"} :** ${literal(article.excerpt)}`,
           );
         }
         lines.push("");

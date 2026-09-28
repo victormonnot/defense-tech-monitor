@@ -1,6 +1,7 @@
 import { parseFeed, publicUrl, type FeedEntry } from "../feed";
 import { parseBrave1Page } from "./brave1";
 import { parseDefenderPage } from "./defender";
+import { parseXAccount } from "../x-client";
 
 export interface CollectionTarget {
   kind: "rss" | "website";
@@ -39,9 +40,12 @@ function websiteTarget(
 export function resolveCollection(
   siteUrl: string,
   feedUrl: string | null,
-): CollectionTarget | null {
+): CollectionTarget | { kind: "x"; url: string; username: string } | null {
   if (feedUrl)
     return { kind: "rss", url: publicUrl(feedUrl), parse: parseFeed };
+  const account = parseXAccount(siteUrl);
+  if (account)
+    return { kind: "x", url: account.url, username: account.username };
   let site: URL;
   try {
     site = new URL(publicUrl(siteUrl));

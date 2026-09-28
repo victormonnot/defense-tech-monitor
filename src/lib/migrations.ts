@@ -1,7 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { GENERAL_FEED, GENERAL_FEED_ID } from "./custom-feeds";
 
-const CURRENT_VERSION = 10;
+const CURRENT_VERSION = 11;
 
 export function migrate(db: DatabaseSync) {
   db.exec("BEGIN IMMEDIATE");
@@ -184,6 +184,26 @@ export function migrate(db: DatabaseSync) {
             a.keep_separate,a.revision,a.reviewed_revision,a.updated_at
           FROM articles a LEFT JOIN article_content c ON c.article_id=a.id;
         PRAGMA user_version = 10;
+      `);
+    }
+    if (version < 11) {
+      db.exec(`
+        CREATE TABLE x_sources (
+          source_id TEXT PRIMARY KEY REFERENCES sources(id) ON DELETE CASCADE,
+          user_id TEXT NOT NULL, username TEXT NOT NULL,
+          since_id TEXT, next_token TEXT, sweep_newest_id TEXT
+        );
+        CREATE TABLE x_requests (
+          id TEXT PRIMARY KEY, month TEXT NOT NULL,
+          kind TEXT NOT NULL CHECK(kind IN ('user','posts')),
+          reserved_micros INTEGER NOT NULL CHECK(reserved_micros >= 0),
+          settled_micros INTEGER CHECK(settled_micros >= 0),
+          resource_count INTEGER CHECK(resource_count >= 0),
+          started_at TEXT NOT NULL, finished_at TEXT,
+          status TEXT NOT NULL CHECK(status IN ('running','success','failed'))
+        );
+        CREATE INDEX x_requests_month ON x_requests(month);
+        PRAGMA user_version = 11;
       `);
     }
     db.exec("COMMIT");

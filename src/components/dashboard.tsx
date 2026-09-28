@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useRef, useState, type FormEvent } from "react";
+import { useId, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   ArrowRight,
   ArrowUpRight,
+  AtSign,
   Bookmark,
   Check,
   CheckCheck,
@@ -18,6 +19,7 @@ import {
   ListFilter,
   LoaderCircle,
   Newspaper,
+  MoreHorizontal,
   Pencil,
   Radio,
   RefreshCw,
@@ -68,6 +70,7 @@ import { JevArticleIndicator, JevPanel } from "@/components/jev-panel";
 import { FeedManager, FeedSettings } from "@/components/feed-settings";
 import { GENERAL_FEED_ID } from "@/lib/custom-feeds";
 import { ArticleSummaryPanel, SummaryPanel } from "@/components/summary-panel";
+import { XSourceStatus } from "@/components/x-source-status";
 
 type View =
   | "personal"
@@ -150,7 +153,7 @@ const viewCopy: Record<
     eyebrow: "VOS SOURCES",
     title: "Sources",
     description:
-      "Gérez les sites suivis et vérifiez le résultat de chaque collecte.",
+      "Gérez les sites et comptes X suivis, puis vérifiez le résultat de chaque collecte.",
   },
   profile: {
     eyebrow: "VOS CRITÈRES",
@@ -167,6 +170,20 @@ const statusLabels: Record<SourceStatus, string> = {
   error: "Erreur de collecte",
   unsupported: "Connecteur à ajouter",
 };
+
+function xAccountLabel(value: string) {
+  const input = value.trim();
+  const handle = input.match(/^@?([a-zA-Z0-9_]{1,15})$/)?.[1];
+  if (handle) return `@${handle}`;
+  try {
+    const url = new URL(input);
+    if (!/^(www\.)?(x\.com|twitter\.com)$/.test(url.hostname)) return "";
+    const account = url.pathname.match(/^\/([a-zA-Z0-9_]{1,15})\/?$/)?.[1];
+    return account ? `@${account}` : "";
+  } catch {
+    return "";
+  }
+}
 
 function dateLabel(value: string | null, withTime = false) {
   if (!value) return "Date non fournie";
@@ -232,6 +249,8 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
   const [view, setView] = useState<View>("personal");
   const [selectedFeedId, setSelectedFeedId] = useState<string | null>(null);
   const [showFeedExcluded, setShowFeedExcluded] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(
     initialData.folders.find((folder) => !folder.archived)?.id ??
       initialData.folders[0]?.id ??
@@ -258,6 +277,7 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
   const [matchScope, setMatchScope] = useState<
     NonNullable<Profile["matchScope"]>
   >(data.profile.matchScope ?? "all_text");
+  const [sourceType, setSourceType] = useState<"website" | "x">("website");
   const [sourceName, setSourceName] = useState("");
   const [siteUrl, setSiteUrl] = useState("");
   const [feedUrl, setFeedUrl] = useState("");
@@ -568,6 +588,8 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
     if (next === "folders")
       setSelectedFolderId((current) => current ?? selectedFolder?.id ?? null);
     setView(next);
+    setFiltersOpen(false);
+    setSettingsOpen(false);
     resetFilters();
   }
 
@@ -587,6 +609,7 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
 
   function resetSourceForm() {
     setEditingSourceId(null);
+    setSourceType("website");
     setSourceName("");
     setSiteUrl("");
     setFeedUrl("");
@@ -595,6 +618,7 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
 
   function editSource(source: Source) {
     setEditingSourceId(source.id);
+    setSourceType(source.collectionKind === "x" ? "x" : "website");
     setSourceName(source.name);
     setSiteUrl(source.siteUrl);
     setFeedUrl(source.feedUrl ?? "");
@@ -609,8 +633,12 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
         action: "addSource",
         name: sourceName.trim(),
         siteUrl: siteUrl.trim(),
-        feedUrl: feedUrl.trim(),
-        ...(sourceLanguage ? { language: sourceLanguage } : {}),
+        ...(sourceType === "website" ? { feedUrl: feedUrl.trim() } : {}),
+        ...(sourceLanguage
+          ? { language: sourceLanguage }
+          : sourceType === "x"
+            ? { language: "und" }
+            : {}),
       },
       "addSource",
       editingSourceId
@@ -638,13 +666,31 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
     view === "feed" && selectedFeed
       ? { ...viewCopy.feed, title: selectedFeed.name }
       : viewCopy[view];
+  const readingView = ["personal", "feed", "all", "saved"].includes(view);
+  const filterLabels = [
+    sourceFilter
+      ? data.sources.find((source) => source.id === sourceFilter)?.name
+      : null,
+    languageFilter ? languageLabel(languageFilter) : null,
+    themeFilter || null,
+    formatFilter
+      ? formatFilter === "post"
+        ? "Publications X"
+        : formatFilter === "video"
+          ? "Vidéos"
+          : "Articles"
+      : null,
+    view !== "evaluation" && activityFilter !== "all"
+      ? activityFilters.find((filter) => filter.id === activityFilter)?.label
+      : null,
+  ].filter(Boolean);
   const busy = pending !== null;
   const pendingSummaryId = pending?.startsWith("generateSummary-")
     ? pending.slice("generateSummary-".length)
     : null;
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${readingView ? "reading-view" : ""}`}>
       <a className="skip-link" href="#main-content">
         Aller au contenu
       </a>
@@ -732,55 +778,81 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
       </aside>
 
       <div className="workspace">
-        <header className="topbar">
-          <div className="breadcrumb">
-            <span>Monitor</span>
-            <ChevronRight size={14} />
-            <strong>
-              {view === "feed"
-                ? (selectedFeed?.name ?? "Fil personnalisé")
-                : views.find((item) => item.id === view)?.label}
-            </strong>
-            {view === "folders" && selectedFolder && (
-              <>
-                <ChevronRight size={14} />
-                <span className="breadcrumb-folder">{selectedFolder.name}</span>
-              </>
-            )}
-          </div>
-          <span className="topbar-label">
-            <span className="tiny-dot" /> Veille personnelle
-          </span>
-        </header>
+        {!readingView && (
+          <header className="topbar">
+            <div className="breadcrumb">
+              <span>Monitor</span>
+              <ChevronRight size={14} />
+              <strong>
+                {view === "feed"
+                  ? (selectedFeed?.name ?? "Fil personnalisé")
+                  : views.find((item) => item.id === view)?.label}
+              </strong>
+              {view === "folders" && selectedFolder && (
+                <>
+                  <ChevronRight size={14} />
+                  <span className="breadcrumb-folder">
+                    {selectedFolder.name}
+                  </span>
+                </>
+              )}
+            </div>
+            <span className="topbar-label">
+              <span className="tiny-dot" /> Veille personnelle
+            </span>
+          </header>
+        )}
 
         <main id="main-content" className="main-content">
           <section className="page-heading">
             <div>
-              <p className="eyebrow">{copy.eyebrow}</p>
+              {!readingView && <p className="eyebrow">{copy.eyebrow}</p>}
               <h1>{copy.title}</h1>
-              <p className="page-description">{copy.description}</p>
+              {!readingView && (
+                <p className="page-description">{copy.description}</p>
+              )}
             </div>
-            <div className="collection-control">
-              <button
-                className="button button-primary"
-                type="button"
-                disabled={busy || data.collection.running}
-                onClick={() => void mutate({ action: "collect" }, "collect")}
-              >
-                {pending === "collect" || data.collection.running ? (
-                  <LoaderCircle className="spin" size={17} />
-                ) : (
-                  <RefreshCw size={17} />
+            <div className="heading-actions">
+              {contextFeed && (
+                <button
+                  type="button"
+                  className="button button-secondary feed-settings-trigger"
+                  aria-expanded={settingsOpen}
+                  aria-controls="feed-preferences"
+                  onClick={() => setSettingsOpen((open) => !open)}
+                >
+                  <Settings2 size={17} />
+                  <span>Personnaliser</span>
+                </button>
+              )}
+              <div className="collection-control">
+                <button
+                  className={`button ${readingView ? "button-secondary" : "button-primary"}`}
+                  type="button"
+                  aria-label="Actualiser les sources"
+                  title="Actualiser les sources"
+                  disabled={busy || data.collection.running}
+                  onClick={() => void mutate({ action: "collect" }, "collect")}
+                >
+                  {pending === "collect" || data.collection.running ? (
+                    <LoaderCircle className="spin" size={17} />
+                  ) : (
+                    <RefreshCw size={17} />
+                  )}
+                  {pending === "collect" || data.collection.running
+                    ? "Collecte en cours…"
+                    : readingView
+                      ? "Actualiser"
+                      : "Actualiser les sources"}
+                </button>
+                {!readingView && (
+                  <span>
+                    {data.lastCollectionAt
+                      ? `Dernière consultation : ${dateLabel(data.lastCollectionAt, true)}`
+                      : "Aucune source consultée"}
+                  </span>
                 )}
-                {pending === "collect" || data.collection.running
-                  ? "Collecte en cours…"
-                  : "Actualiser les sources"}
-              </button>
-              <span>
-                {data.lastCollectionAt
-                  ? `Dernière consultation : ${dateLabel(data.lastCollectionAt, true)}`
-                  : "Aucune source consultée"}
-              </span>
+              </div>
             </div>
           </section>
 
@@ -820,7 +892,7 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
             </div>
           )}
 
-          {view !== "digest" && (
+          {!readingView && view !== "digest" && (
             <div className="stats-grid" aria-label="Vue d’ensemble">
               <Stat
                 label="Publications collectées"
@@ -869,67 +941,13 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
           )}
 
           {(view === "personal" || view === "feed") && contextFeed && (
-            <details className="feed-settings-disclosure" key={contextFeed.id}>
-              <summary>
-                <Settings2 size={16} /> Consignes et réglages de{" "}
-                {contextFeed.name}
-              </summary>
-              <FeedSettings
-                feed={contextFeed}
-                articles={data.articles}
-                busy={busy}
-                onAction={(action) => mutate(action)}
-              />
-            </details>
-          )}
-
-          {view === "feed" && selectedFeed && (
-            <div className="selection-note">
-              <ListFilter size={18} />
-              <span>
-                {selectedFeed.analysis.ready} analyse(s) disponible(s) ·{" "}
-                {selectedFeed.analysis.pending} en attente ·{" "}
-                {selectedFeed.analysis.failed} en échec.
-                {selectedFeed.archived
-                  ? " Fil archivé : analyses en pause."
-                  : !selectedFeed.enabled
-                    ? " Analyses de ce fil en pause."
-                    : data.jev?.mode === "off"
-                      ? " Jev est désactivé dans le profil de veille."
-                      : ""}{" "}
-                Les résultats absents ou sous le seuil de confiance ne sont pas
-                sélectionnés automatiquement.
-              </span>
-              <label className="grouping-toggle">
-                <input
-                  type="checkbox"
-                  checked={showFeedExcluded}
-                  onChange={(event) =>
-                    setShowFeedExcluded(event.target.checked)
-                  }
-                />
-                Voir aussi les publications écartées
-              </label>
-            </div>
-          )}
-
-          {view === "folders" && (
-            <FolderManager
-              folders={data.folders}
-              selectedFolder={selectedFolder}
-              busy={busy}
-              onSelect={openFolder}
-              onAction={(action) => mutate(action)}
-            />
-          )}
-
-          {(view === "personal" ||
-            (view === "feed" && selectedFeed) ||
-            view === "all" ||
-            view === "saved" ||
-            (view === "folders" && selectedFolder) ||
-            view === "evaluation") && (
-            <>
+            <section
+              id="feed-preferences"
+              className="feed-preferences"
+              hidden={!settingsOpen}
+              key={contextFeed.id}
+              aria-label="Personnaliser ce fil"
+            >
               {view === "personal" && (
                 <div className="selection-note">
                   <span className="selection-icon">
@@ -970,6 +988,61 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                   </button>
                 </div>
               )}
+              {view === "feed" && selectedFeed && (
+                <div className="selection-note">
+                  <ListFilter size={18} />
+                  <span>
+                    {selectedFeed.analysis.ready} analyse(s) disponible(s) ·{" "}
+                    {selectedFeed.analysis.pending} en attente ·{" "}
+                    {selectedFeed.analysis.failed} en échec.
+                    {selectedFeed.archived
+                      ? " Fil archivé : analyses en pause."
+                      : !selectedFeed.enabled
+                        ? " Analyses de ce fil en pause."
+                        : data.jev?.mode === "off"
+                          ? " Jev est désactivé dans le profil de veille."
+                          : ""}{" "}
+                    Les résultats absents ou sous le seuil de confiance ne sont
+                    pas sélectionnés automatiquement.
+                  </span>
+                  <label className="grouping-toggle">
+                    <input
+                      type="checkbox"
+                      checked={showFeedExcluded}
+                      onChange={(event) =>
+                        setShowFeedExcluded(event.target.checked)
+                      }
+                    />
+                    Voir aussi les publications écartées
+                  </label>
+                </div>
+              )}
+              <FeedSettings
+                feed={contextFeed}
+                articles={data.articles}
+                busy={busy}
+                onAction={(action) => mutate(action)}
+              />
+            </section>
+          )}
+
+          {view === "folders" && (
+            <FolderManager
+              folders={data.folders}
+              selectedFolder={selectedFolder}
+              busy={busy}
+              onSelect={openFolder}
+              onAction={(action) => mutate(action)}
+            />
+          )}
+
+          {(view === "personal" ||
+            (view === "feed" && selectedFeed) ||
+            view === "all" ||
+            view === "saved" ||
+            (view === "folders" && selectedFolder) ||
+            view === "evaluation") && (
+            <>
               {view === "evaluation" && (
                 <section
                   className="evaluation-controls"
@@ -1012,7 +1085,7 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                 </section>
               )}
               <section className="feed-section" aria-labelledby="feed-title">
-                <div className="section-heading">
+                <div className={readingView ? "sr-only" : "section-heading"}>
                   <div className="section-title">
                     <h2 id="feed-title">
                       {view === "personal"
@@ -1039,7 +1112,7 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                       : "Publications des sources suivies"}
                   </span>
                 </div>
-                <div className="filter-panel">
+                <div className="reading-toolbar">
                   <div className="search-field">
                     <Search size={18} />
                     <label className="sr-only" htmlFor="article-search">
@@ -1048,11 +1121,51 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                     <input
                       id="article-search"
                       type="search"
-                      placeholder="Rechercher un sujet, un titre, une source…"
+                      placeholder="Rechercher dans ce fil…"
                       value={search}
                       onChange={(event) => setSearch(event.target.value)}
                     />
                   </div>
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    aria-expanded={filtersOpen}
+                    aria-controls="feed-filters"
+                    onClick={() => setFiltersOpen((open) => !open)}
+                  >
+                    <ListFilter size={17} /> Filtres
+                    {filterLabels.length > 0 ? ` · ${filterLabels.length}` : ""}
+                  </button>
+                </div>
+                {hasFilters && (
+                  <div className="active-filter-summary" role="status">
+                    <span>
+                      {articles.length} résultat{articles.length > 1 ? "s" : ""}
+                      {filterLabels.length > 0
+                        ? ` · ${filterLabels.join(" · ")}`
+                        : ""}
+                    </span>
+                    <button type="button" onClick={resetFilters}>
+                      <X size={14} /> Effacer
+                    </button>
+                  </div>
+                )}
+                {showFeedExcluded && view === "feed" && (
+                  <div className="active-filter-summary" role="status">
+                    <span>Les publications écartées sont aussi affichées.</span>
+                    <button
+                      type="button"
+                      onClick={() => setShowFeedExcluded(false)}
+                    >
+                      Revenir à la sélection
+                    </button>
+                  </div>
+                )}
+                <div
+                  id="feed-filters"
+                  className="feed-filters"
+                  hidden={!filtersOpen}
+                >
                   <div className="filters">
                     <ListFilter
                       size={17}
@@ -1100,144 +1213,136 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                       options={[
                         { value: "article", label: "Articles" },
                         { value: "video", label: "Vidéos" },
+                        { value: "post", label: "Publications X" },
                       ]}
                       all="Tous les formats"
                     />
-                    {hasFilters && (
-                      <button
-                        type="button"
-                        className="reset-filters"
-                        onClick={resetFilters}
-                      >
-                        <X size={13} /> Effacer
-                      </button>
-                    )}
                   </div>
-                </div>
-                {view !== "evaluation" && (
-                  <section
-                    className="activity-controls"
-                    aria-label="Nouveautés de la veille"
-                  >
-                    <div className="activity-heading">
-                      <div>
-                        <h3>Votre point de veille</h3>
-                        <p className="activity-context">
-                          {data.activity.lastReviewedAt
-                            ? "Dernière validation : "
-                            : "Suivi des nouveautés depuis le "}
-                          <time
-                            dateTime={
-                              data.activity.lastReviewedAt ??
-                              data.activity.startedAt
-                            }
-                          >
-                            {dateLabel(
-                              data.activity.lastReviewedAt ??
-                                data.activity.startedAt,
-                              true,
-                            )}
-                          </time>
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        className="button button-secondary activity-review"
-                        disabled={busy || activityBatch.length === 0}
-                        onClick={() =>
-                          void mutate({
-                            action: "acknowledgeChanges",
-                            articles: activityBatch,
-                          })
-                        }
-                      >
-                        {pending === "acknowledgeChanges" ? (
-                          <LoaderCircle size={16} className="spin" />
-                        ) : (
-                          <CheckCheck size={16} />
-                        )}
-                        <span>
-                          Valider les nouveautés affichées (
-                          {activityBatch.length})
-                        </span>
-                      </button>
-                    </div>
-                    <div
-                      className="activity-tabs"
-                      role="group"
-                      aria-label="Filtrer par nouveauté"
-                    >
-                      {activityFilters.map(({ id, label }) => (
-                        <button
-                          key={id}
-                          type="button"
-                          aria-pressed={activityFilter === id}
-                          className={`activity-tab ${activityFilter === id ? "is-selected" : ""}`}
-                          onClick={() => setActivityFilter(id)}
-                        >
-                          {label}
-                          <span>{activityCounts[id]}</span>
-                        </button>
-                      ))}
-                    </div>
-                    <p className="activity-help">
-                      Validez les publications de cette vue sans les marquer
-                      comme lues.
-                      {activityFilter !== "all" &&
-                        " Les dernières collectes ou modifications apparaissent en premier."}
-                    </p>
-                    <details className="activity-explanation">
-                      <summary>Comprendre les repères</summary>
-                      <p className="activity-help">
-                        « Nouvelle » signale une première collecte, même pour
-                        une publication ancienne. « Actualisée » signale une
-                        modification des données collectées. Ces repères restent
-                        présents jusqu’à validation, indépendamment de l’état
-                        lu.
-                      </p>
-                      <p className="activity-help">
-                        Les compteurs suivent vos filtres. Valider retire les
-                        repères des publications affichées, y compris dans les
-                        regroupements. Les publications masquées par vos filtres
-                        conservent leurs repères.
-                      </p>
-                    </details>
-                    {visibleChanges > MAX_ACTIVITY_BATCH && (
-                      <p className="activity-limit" role="status">
-                        Les {MAX_ACTIVITY_BATCH} premières nouveautés de cette
-                        vue seront validées. Les{" "}
-                        {visibleChanges - MAX_ACTIVITY_BATCH} suivantes
-                        conserveront leur repère.
-                      </p>
-                    )}
-                  </section>
-                )}
-                <div className="feed-display-controls">
                   {view !== "evaluation" && (
-                    <label className="grouping-toggle">
-                      <input
-                        type="checkbox"
-                        checked={groupStories}
-                        onChange={(event) =>
-                          setGroupStories(event.target.checked)
-                        }
-                      />
-                      Regrouper les annonces similaires
-                    </label>
+                    <section
+                      className="activity-controls"
+                      aria-label="Nouveautés de la veille"
+                    >
+                      <div className="activity-heading">
+                        <div>
+                          <h3>Votre point de veille</h3>
+                          <p className="activity-context">
+                            {data.activity.lastReviewedAt
+                              ? "Dernière validation : "
+                              : "Suivi des nouveautés depuis le "}
+                            <time
+                              dateTime={
+                                data.activity.lastReviewedAt ??
+                                data.activity.startedAt
+                              }
+                            >
+                              {dateLabel(
+                                data.activity.lastReviewedAt ??
+                                  data.activity.startedAt,
+                                true,
+                              )}
+                            </time>
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          className="button button-secondary activity-review"
+                          disabled={busy || activityBatch.length === 0}
+                          onClick={() =>
+                            void mutate({
+                              action: "acknowledgeChanges",
+                              articles: activityBatch,
+                            })
+                          }
+                        >
+                          {pending === "acknowledgeChanges" ? (
+                            <LoaderCircle size={16} className="spin" />
+                          ) : (
+                            <CheckCheck size={16} />
+                          )}
+                          <span>
+                            Valider les nouveautés affichées (
+                            {activityBatch.length})
+                          </span>
+                        </button>
+                      </div>
+                      <div
+                        className="activity-tabs"
+                        role="group"
+                        aria-label="Filtrer par nouveauté"
+                      >
+                        {activityFilters.map(({ id, label }) => (
+                          <button
+                            key={id}
+                            type="button"
+                            aria-pressed={activityFilter === id}
+                            className={`activity-tab ${activityFilter === id ? "is-selected" : ""}`}
+                            onClick={() => setActivityFilter(id)}
+                          >
+                            {label}
+                            <span>{activityCounts[id]}</span>
+                          </button>
+                        ))}
+                      </div>
+                      <p className="activity-help">
+                        Validez les publications de cette vue sans les marquer
+                        comme lues.
+                        {activityFilter !== "all" &&
+                          " Les dernières collectes ou modifications apparaissent en premier."}
+                      </p>
+                      <details className="activity-explanation">
+                        <summary>Comprendre les repères</summary>
+                        <p className="activity-help">
+                          « Nouvelle » signale une première collecte, même pour
+                          une publication ancienne. « Actualisée » signale une
+                          modification des données collectées. Ces repères
+                          restent présents jusqu’à validation, indépendamment de
+                          l’état lu.
+                        </p>
+                        <p className="activity-help">
+                          Les compteurs suivent vos filtres. Valider retire les
+                          repères des publications affichées, y compris dans les
+                          regroupements. Les publications masquées par vos
+                          filtres conservent leurs repères.
+                        </p>
+                      </details>
+                      {visibleChanges > MAX_ACTIVITY_BATCH && (
+                        <p className="activity-limit" role="status">
+                          Les {MAX_ACTIVITY_BATCH} premières nouveautés de cette
+                          vue seront validées. Les{" "}
+                          {visibleChanges - MAX_ACTIVITY_BATCH} suivantes
+                          conserveront leur repère.
+                        </p>
+                      )}
+                    </section>
                   )}
-                  <p className="feed-count" role="status">
-                    {articles.length} publication
-                    {articles.length > 1 ? "s" : ""}
-                    {groupedCount > 0 && (
-                      <>
-                        {" "}
-                        · {feedItems.length} fiche
-                        {feedItems.length > 1 ? "s" : ""} affichée
-                        {feedItems.length > 1 ? "s" : ""}, dont {groupedCount}{" "}
-                        regroupement{groupedCount > 1 ? "s" : ""}
-                      </>
+                  <div className="feed-display-controls">
+                    {view !== "evaluation" && (
+                      <label className="grouping-toggle">
+                        <input
+                          type="checkbox"
+                          checked={groupStories}
+                          onChange={(event) =>
+                            setGroupStories(event.target.checked)
+                          }
+                        />
+                        Regrouper les annonces similaires
+                      </label>
                     )}
-                  </p>
+                    <p className="feed-count" role="status">
+                      {articles.length} publication
+                      {articles.length > 1 ? "s" : ""}
+                      {groupedCount > 0 && (
+                        <>
+                          {" "}
+                          · {feedItems.length} fiche
+                          {feedItems.length > 1 ? "s" : ""} affichée
+                          {feedItems.length > 1 ? "s" : ""}, dont {groupedCount}{" "}
+                          regroupement{groupedCount > 1 ? "s" : ""}
+                        </>
+                      )}
+                    </p>
+                  </div>
                 </div>
                 <div
                   className="article-list"
@@ -1369,10 +1474,6 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                     </div>
                   )}
                 </div>
-                <p className="feed-footnote">
-                  Les titres et extraits sont ceux des sources. Consultez la
-                  publication originale pour lire le contenu complet.
-                </p>
               </section>
             </>
           )}
@@ -1384,6 +1485,7 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                 busy={busy}
                 onAction={(action) => void mutate(action)}
               />
+              {data.x && <XSourceStatus state={data.x} />}
               <div className="sources-layout">
                 <section aria-labelledby="sources-title">
                   <div className="section-heading">
@@ -1397,7 +1499,9 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                       <article className="source-card" key={source.id}>
                         <div className="source-card-top">
                           <span className="source-icon">
-                            {source.collectionKind === "website" ? (
+                            {source.collectionKind === "x" ? (
+                              <AtSign size={20} />
+                            ) : source.collectionKind === "website" ? (
                               <Globe2 size={20} />
                             ) : (
                               <Rss size={20} />
@@ -1410,7 +1514,10 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                               target="_blank"
                               rel="noreferrer"
                             >
-                              Consulter le site <ArrowUpRight size={12} />
+                              {source.collectionKind === "x"
+                                ? "Voir le compte sur X"
+                                : "Consulter le site"}{" "}
+                              <ArrowUpRight size={12} />
                             </a>
                           </div>
                           <div className="source-controls">
@@ -1452,7 +1559,9 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                               ? "RSS/Atom"
                               : source.collectionKind === "website"
                                 ? "Page publique"
-                                : "Connecteur indisponible"}
+                                : source.collectionKind === "x"
+                                  ? "Compte X"
+                                  : "Connecteur indisponible"}
                           </span>
                           <span
                             className={`source-status status-${source.status}`}
@@ -1469,7 +1578,7 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                             {source.enabled ? "Active" : "Désactivée"}
                           </span>
                         </div>
-                        {source.content && (
+                        {source.content && source.collectionKind !== "x" && (
                           <p className="schedule-help">
                             Texte des articles : {source.content.available}{" "}
                             disponible(s)
@@ -1504,22 +1613,23 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                             </dd>
                           </div>
                         </dl>
-                        {source.collectionUrl && (
-                          <a
-                            className="feed-url"
-                            href={source.collectionUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            {source.collectionKind === "website" ? (
-                              <Globe2 size={12} />
-                            ) : (
-                              <Rss size={12} />
-                            )}
-                            <span>{source.collectionUrl}</span>
-                            <ExternalLink size={12} />
-                          </a>
-                        )}
+                        {source.collectionUrl &&
+                          source.collectionKind !== "x" && (
+                            <a
+                              className="feed-url"
+                              href={source.collectionUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              {source.collectionKind === "website" ? (
+                                <Globe2 size={12} />
+                              ) : (
+                                <Rss size={12} />
+                              )}
+                              <span>{source.collectionUrl}</span>
+                              <ExternalLink size={12} />
+                            </a>
+                          )}
                       </article>
                     ))}
                     {data.sources.length === 0 && (
@@ -1527,9 +1637,9 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                         <Rss size={28} />
                         <h3>Ajoutez votre première source.</h3>
                         <p>
-                          Renseignez son site. Pour Brave1 et Defender Media, la
-                          page publique est reconnue automatiquement. Un flux
-                          RSS/Atom peut être fourni pour les autres sources.
+                          Ajoutez un site, un flux RSS/Atom ou un compte X.
+                          Brave1 et Defender Media sont reconnus automatiquement
+                          depuis leur adresse.
                         </p>
                       </div>
                     )}
@@ -1541,7 +1651,11 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                 >
                   <div className="panel-heading">
                     <span className="panel-icon">
-                      <Rss size={19} />
+                      {sourceType === "x" ? (
+                        <AtSign size={19} />
+                      ) : (
+                        <Rss size={19} />
+                      )}
                     </span>
                     <h2 id="add-source-title">
                       {editingSourceId
@@ -1552,9 +1666,25 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                   <p className="muted">
                     {editingSourceId
                       ? "Mettez à jour ses paramètres. Son état d’activation est conservé."
-                      : "Ajoutez un site ou un flux à votre veille."}
+                      : "Ajoutez un site, un flux ou un compte X à votre veille."}
                   </p>
                   <form onSubmit={addSource} className="stacked-form">
+                    <label htmlFor="source-type">Type de source</label>
+                    <select
+                      id="source-type"
+                      value={sourceType}
+                      disabled={editingSourceId !== null || busy}
+                      onChange={(event) => {
+                        setSourceType(event.target.value as "website" | "x");
+                        setSourceName("");
+                        setSiteUrl("");
+                        setFeedUrl("");
+                        setSourceLanguage("");
+                      }}
+                    >
+                      <option value="website">Site web / RSS</option>
+                      <option value="x">Compte X</option>
+                    </select>
                     <label htmlFor="source-name">
                       Nom de la source <span className="required-mark">*</span>
                     </label>
@@ -1563,47 +1693,79 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
                       ref={sourceNameInput}
                       value={sourceName}
                       onChange={(event) => setSourceName(event.target.value)}
-                      placeholder="Nom de la publication"
+                      placeholder={
+                        sourceType === "x" ? "@compte" : "Nom de la publication"
+                      }
                       required
                       maxLength={120}
                     />
                     <label htmlFor="source-site">
-                      Site web <span className="required-mark">*</span>
+                      {sourceType === "x" ? "Compte ou profil X" : "Site web"}{" "}
+                      <span className="required-mark">*</span>
                     </label>
                     <input
                       id="source-site"
-                      type="url"
+                      type={sourceType === "x" ? "text" : "url"}
                       value={siteUrl}
                       readOnly={editingSourceId !== null}
                       aria-describedby={
-                        editingSourceId ? "source-site-help" : undefined
+                        editingSourceId || sourceType === "x"
+                          ? "source-site-help"
+                          : undefined
                       }
-                      onChange={(event) => setSiteUrl(event.target.value)}
-                      placeholder="https://…"
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        if (
+                          sourceType === "x" &&
+                          (!sourceName || sourceName === xAccountLabel(siteUrl))
+                        ) {
+                          setSourceName(xAccountLabel(value));
+                        }
+                        setSiteUrl(value);
+                      }}
+                      placeholder={
+                        sourceType === "x"
+                          ? "@compte ou https://x.com/compte"
+                          : "https://…"
+                      }
+                      autoCapitalize="none"
+                      spellCheck={false}
                       required
                     />
                     {editingSourceId && (
                       <p id="source-site-help" className="field-help">
-                        L’adresse du site identifie cette source et ne peut pas
-                        être modifiée ici.
+                        {sourceType === "x"
+                          ? "Ce compte identifie la source et ne peut pas être modifié ici."
+                          : "L’adresse du site identifie cette source et ne peut pas être modifiée ici."}
                       </p>
                     )}
-                    <label htmlFor="source-feed">
-                      Flux RSS/Atom{" "}
-                      <span className="optional-label">facultatif</span>
-                    </label>
-                    <input
-                      id="source-feed"
-                      type="url"
-                      value={feedUrl}
-                      onChange={(event) => setFeedUrl(event.target.value)}
-                      placeholder="https://…/feed"
-                    />
-                    <p className="field-help">
-                      Sans flux, Brave1 et Defender Media utilisent leur page
-                      anglaise de publications. Pour les autres sites, une
-                      détection de flux RSS/Atom sera tentée.
-                    </p>
+                    {!editingSourceId && sourceType === "x" && (
+                      <p id="source-site-help" className="field-help">
+                        Le nom est prérempli depuis le compte et reste
+                        modifiable. L’ajout enregistre la source sans consulter
+                        l’API X.
+                      </p>
+                    )}
+                    {sourceType === "website" && (
+                      <>
+                        <label htmlFor="source-feed">
+                          Flux RSS/Atom{" "}
+                          <span className="optional-label">facultatif</span>
+                        </label>
+                        <input
+                          id="source-feed"
+                          type="url"
+                          value={feedUrl}
+                          onChange={(event) => setFeedUrl(event.target.value)}
+                          placeholder="https://…/feed"
+                        />
+                        <p className="field-help">
+                          Sans flux, Brave1 et Defender Media utilisent leur
+                          page anglaise de publications. Pour les autres sites,
+                          une détection de flux RSS/Atom sera tentée.
+                        </p>
+                      </>
+                    )}
                     <label htmlFor="source-language">
                       Langue <span className="optional-label">facultatif</span>
                     </label>
@@ -2188,30 +2350,11 @@ function StoryCard({
   onOpenProfile: () => void;
 }) {
   const [lead, ...otherArticles] = articles;
-  const sources = [...new Set(articles.map((article) => article.sourceName))];
   return (
-    <section className="story-card" aria-label="Même annonce probable">
-      <header className="story-header">
-        <div className="story-label">
-          <Layers3 size={16} />
-          <strong>Même annonce probable</strong>
-          <span>{articles.length} publications</span>
-        </div>
-        <p className="story-sources">{sources.join(" · ")}</p>
-        <p className="story-caution">
-          Ces reprises ne constituent pas des confirmations indépendantes.
-        </p>
-        <details className="story-explanation">
-          <summary>Pourquoi ce regroupement ?</summary>
-          <p>{group.reason}</p>
-          <p>
-            Comparaison des titres et du texte collecté dans les flux ou les
-            pages de liste. Le contenu intégral des articles n’est pas
-            nécessairement disponible. Vous pouvez conserver chaque publication
-            séparément.
-          </p>
-        </details>
-      </header>
+    <section
+      className="story-card reading-story"
+      aria-label="Même annonce probable"
+    >
       <ArticleCard
         article={lead}
         matchScope={matchScope}
@@ -2225,80 +2368,43 @@ function StoryCard({
         summaryPending={pendingSummaryId === lead.id}
         onOpenProfile={onOpenProfile}
       />
-      <div className="story-members">
-        <p className="story-members-label">Autres publications rapprochées</p>
+      <details className="reading-story-members">
+        <summary>
+          <Layers3 size={16} /> {otherArticles.length} autre
+          {otherArticles.length > 1 ? "s" : ""} publication
+          {otherArticles.length > 1 ? "s" : ""} similaire
+          {otherArticles.length > 1 ? "s" : ""}
+        </summary>
+        <p className="story-caution">
+          Même annonce probable. Ces reprises ne constituent pas des
+          confirmations indépendantes.
+        </p>
+        <details className="story-explanation">
+          <summary>Pourquoi ce regroupement ?</summary>
+          <p>{group.reason}</p>
+          <p>
+            Comparaison des titres et du texte disponible, sans garantie d’avoir
+            le contenu intégral. Vous pouvez conserver chaque publication
+            séparément dans ses options.
+          </p>
+        </details>
         {otherArticles.map((article) => (
-          <div className="story-member" key={article.id}>
-            <div className="article-meta">
-              <span className="article-source">{article.sourceName}</span>
-              <span className="meta-dot">·</span>
-              <time dateTime={article.publishedAt ?? undefined}>
-                {dateLabel(article.publishedAt)}
-              </time>
-              <span className="meta-dot">·</span>
-              <span>{languageLabel(article.language)}</span>
-              <ActivityBadge article={article} />
-            </div>
-            <h3>
-              <a href={article.url} target="_blank" rel="noreferrer">
-                {article.title} <ArrowUpRight size={15} />
-              </a>
-            </h3>
-            <ArticleSummaryPanel
-              article={article}
-              busy={busy}
-              pending={pendingSummaryId === article.id}
-              onGenerate={() =>
-                onAction({ action: "generateSummary", id: article.id })
-              }
-              onOpenProfile={onOpenProfile}
-            />
-            <div className="story-member-status">
-              <span>
-                {article.isRead ? <Check size={13} /> : <Eye size={13} />}
-                {article.isRead ? "Lu" : "Non lu"}
-              </span>
-              <span>
-                <Bookmark
-                  size={13}
-                  fill={article.saved ? "currentColor" : "none"}
-                />
-                {article.saved ? "Sauvegardé" : "Non sauvegardé"}
-              </span>
-              <SeparateAction
-                article={article}
-                busy={busy}
-                onAction={onAction}
-              />
-            </div>
-            <JevArticleIndicator article={article} feedName={feedName} />
-            <ArticleFolders
-              article={article}
-              folders={folders}
-              busy={busy}
-              onAction={onAction}
-              onOpenFolders={onOpenFolders}
-            />
-            <details className="story-member-details">
-              <summary>Détails et actions pour cette publication</summary>
-              <ArticleCard
-                article={article}
-                matchScope={matchScope}
-                grouped
-                related={relatedByArticle.get(article.id)}
-                folders={folders}
-                showFolders={false}
-                onOpenFolders={onOpenFolders}
-                busy={busy}
-                onAction={onAction}
-                feedName={feedName}
-                showSummary={false}
-                onOpenProfile={onOpenProfile}
-              />
-            </details>
-          </div>
+          <ArticleCard
+            key={article.id}
+            article={article}
+            matchScope={matchScope}
+            grouped
+            related={relatedByArticle.get(article.id)}
+            folders={folders}
+            onOpenFolders={onOpenFolders}
+            busy={busy}
+            onAction={onAction}
+            feedName={feedName}
+            summaryPending={pendingSummaryId === article.id}
+            onOpenProfile={onOpenProfile}
+          />
         ))}
-      </div>
+      </details>
     </section>
   );
 }
@@ -2341,8 +2447,45 @@ function ArticleCard({
     { value: "off_topic", label: "Hors sujet", icon: ThumbsDown },
     { value: "seen", label: "Déjà vu", icon: CheckCheck },
   ];
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  const optionsId = useId();
+  const hasSummary =
+    showSummary &&
+    article.summary?.status === "ready" &&
+    Boolean(article.summary.text);
+  const mainText =
+    article.format === "post" && !hasSummary
+      ? (article.excerpt ?? article.title)
+      : article.title;
+  const headingText =
+    article.format === "post" && !hasSummary && mainText.length > 400
+      ? `${mainText
+          .slice(0, 397)
+          .replace(/\s+\S*$/, "")
+          .trimEnd()}…`
+      : mainText;
+  const repeatsPostTitle =
+    article.format === "post" &&
+    article.excerpt?.replace(/\s+/g, " ").trim() ===
+      article.title.replace(/\s+/g, " ").trim();
+  const visibleExcerpt =
+    article.contentBasis !== "metadata" && !repeatsPostTitle
+      ? article.excerpt
+      : null;
+  const provenance =
+    article.format === "post"
+      ? "Texte publié sur X"
+      : article.contentBasis === "page_text"
+        ? "Extrait de la page publique de l’article"
+        : article.contentBasis === "page_excerpt"
+          ? "Extrait de la page de publications"
+          : article.contentBasis === "feed_text"
+            ? "Texte fourni par le flux"
+            : "Titre et métadonnées uniquement";
   return (
-    <article className={`article-card ${article.isRead ? "article-read" : ""}`}>
+    <article
+      className={`article-card reading-card ${article.isRead ? "article-read" : ""}`}
+    >
       <div className="article-main">
         <div className="article-meta">
           <span className="article-source">{article.sourceName}</span>
@@ -2350,11 +2493,12 @@ function ArticleCard({
           <time dateTime={article.publishedAt ?? undefined}>
             {dateLabel(article.publishedAt)}
           </time>
-          <span className="meta-dot">·</span>
-          <span>{languageLabel(article.language)}</span>
-          <span className="format-tag">
-            {article.format === "video" ? "Vidéo" : "Article"}
-          </span>
+          {article.format === "video" && (
+            <span className="format-tag">Vidéo</span>
+          )}
+          {article.format === "post" && (
+            <span className="format-tag">Publication X</span>
+          )}
           <ActivityBadge article={article} />
           {article.isRead && (
             <span className="read-label">
@@ -2363,38 +2507,32 @@ function ArticleCard({
           )}
         </div>
         <h3>
-          <a href={article.url} target="_blank" rel="noreferrer">
-            {article.title}
-            <ArrowUpRight size={17} />
+          <a
+            href={article.url}
+            target="_blank"
+            rel="noreferrer"
+            lang={article.language === "und" ? undefined : article.language}
+          >
+            {headingText}
           </a>
         </h3>
-        {article.themes.length > 0 && (
-          <div className="theme-list">
-            {article.themes.map((theme) => (
-              <span className="theme-tag" key={theme}>
-                {theme}
-              </span>
-            ))}
-          </div>
-        )}
-        {article.excerpt && article.contentBasis !== "metadata" && (
-          <div className="article-excerpt">
-            <span>
-              {article.contentBasis === "page_text"
-                ? "Extrait de l’article"
-                : article.contentBasis === "page_excerpt"
-                  ? "Extrait de la page"
-                  : "Extrait du flux"}
-            </span>
-            <p>
-              {article.excerpt.length > 400
-                ? `${article.excerpt.slice(0, 397).trimEnd()}…`
-                : article.excerpt}
-            </p>
-          </div>
+        {!hasSummary && article.format !== "post" && visibleExcerpt && (
+          <p
+            className="reading-excerpt"
+            aria-label="Extrait de la source"
+            lang={article.language === "und" ? undefined : article.language}
+          >
+            {visibleExcerpt.length > 400
+              ? `${visibleExcerpt
+                  .slice(0, 397)
+                  .replace(/\s+\S*$/, "")
+                  .trimEnd()}…`
+              : visibleExcerpt}
+          </p>
         )}
         {showSummary && (
           <ArticleSummaryPanel
+            compact
             article={article}
             busy={busy}
             pending={summaryPending}
@@ -2404,6 +2542,144 @@ function ArticleCard({
             onOpenProfile={onOpenProfile}
           />
         )}
+      </div>
+      <div className="reading-card-actions">
+        <a
+          className="reading-source-link"
+          href={article.url}
+          target="_blank"
+          rel="noreferrer"
+        >
+          {article.format === "post"
+            ? "Voir sur X"
+            : article.format === "video"
+              ? "Voir la publication"
+              : "Lire l’article"}{" "}
+          <ArrowUpRight size={15} />
+        </a>
+        <div className="reading-quick-actions">
+          <button
+            type="button"
+            className="reading-icon-action"
+            aria-pressed={article.isRead}
+            aria-label="Marquer comme lu"
+            title={article.isRead ? "Marquer comme non lu" : "Marquer comme lu"}
+            disabled={busy}
+            onClick={() =>
+              onAction({
+                action: "setRead",
+                id: article.id,
+                value: !article.isRead,
+              })
+            }
+          >
+            <Check size={18} />
+          </button>
+          <button
+            type="button"
+            className="reading-icon-action"
+            aria-pressed={article.saved}
+            aria-label="Sauvegarder"
+            title={article.saved ? "Retirer des sauvegardes" : "Sauvegarder"}
+            disabled={busy}
+            onClick={() =>
+              onAction({
+                action: "setSaved",
+                id: article.id,
+                value: !article.saved,
+              })
+            }
+          >
+            <Bookmark
+              size={18}
+              fill={article.saved ? "currentColor" : "none"}
+            />
+          </button>
+          <button
+            type="button"
+            className="reading-icon-action"
+            aria-expanded={optionsOpen}
+            aria-controls={optionsId}
+            aria-label="Options de la publication"
+            title="Classement et détails de la publication"
+            onClick={() => setOptionsOpen((open) => !open)}
+          >
+            <MoreHorizontal size={20} />
+          </button>
+        </div>
+      </div>
+      <div
+        id={optionsId}
+        className="reading-card-options"
+        hidden={!optionsOpen}
+      >
+        <p className="reading-provenance">
+          {languageLabel(article.language)} · {provenance}
+        </p>
+        {hasSummary && visibleExcerpt && (
+          <details className="reading-original-excerpt">
+            <summary>
+              {article.format === "post"
+                ? "Voir le texte original"
+                : "Voir l’extrait original"}
+            </summary>
+            <p lang={article.language === "und" ? undefined : article.language}>
+              {visibleExcerpt}
+            </p>
+          </details>
+        )}
+        {article.themes.length > 0 && (
+          <div className="theme-list">
+            {article.themes.map((theme) => (
+              <span className="theme-tag" key={theme}>
+                {theme}
+              </span>
+            ))}
+          </div>
+        )}
+        {showFolders && (
+          <ArticleFolders
+            article={article}
+            folders={folders}
+            busy={busy}
+            onAction={onAction}
+            onOpenFolders={onOpenFolders}
+          />
+        )}
+        <div
+          className="feedback-actions"
+          aria-label="Évaluer cette publication"
+        >
+          {feedbackOptions.map(({ value, label, icon: Icon }) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={article.feedback === value}
+              title={
+                article.feedback === value
+                  ? "Retirer ce retour et réappliquer le mode de sélection"
+                  : value === "relevant"
+                    ? `Retenir cette publication dans ${feedName ?? "Pour moi"}`
+                    : `Retirer cette publication de ${feedName ?? "Pour moi"}`
+              }
+              className={`article-action feedback-action ${article.feedback === value ? "is-selected" : ""}`}
+              disabled={busy}
+              onClick={() =>
+                onAction({
+                  action: "setFeedback",
+                  id: article.id,
+                  value: article.feedback === value ? null : value,
+                })
+              }
+            >
+              <Icon size={14} />
+              {label}
+            </button>
+          ))}
+        </div>
+        {(grouped || article.keepSeparate) && (
+          <SeparateAction article={article} busy={busy} onAction={onAction} />
+        )}
         {!feedName && (
           <div className="analysis-details">
             <span>
@@ -2412,13 +2688,15 @@ function ArticleCard({
                 ? article.excerpt
                   ? "Titre et extrait utilisés par les règles"
                   : "Titre seul utilisé par les règles"
-                : article.contentBasis === "feed_text"
-                  ? "Texte du flux utilisé par les règles"
-                  : article.contentBasis === "page_text"
-                    ? "Texte de l’article utilisé par les règles"
-                    : article.contentBasis === "page_excerpt"
-                      ? "Extrait de la page utilisé par les règles"
-                      : "Titre seul utilisé par les règles"}
+                : article.format === "post"
+                  ? "Texte publié sur X utilisé par les règles"
+                  : article.contentBasis === "feed_text"
+                    ? "Texte du flux utilisé par les règles"
+                    : article.contentBasis === "page_text"
+                      ? "Texte de l’article utilisé par les règles"
+                      : article.contentBasis === "page_excerpt"
+                        ? "Extrait de la page utilisé par les règles"
+                        : "Titre seul utilisé par les règles"}
             </span>
             {article.reasons.length > 0 && (
               <details>
@@ -2468,123 +2746,37 @@ function ArticleCard({
             </p>
           </aside>
         )}
-      </div>
-      <div
-        className="article-score"
-        aria-label={
-          feedName || article.jev?.applied
-            ? `Intérêt Jev : ${article.jev?.score ?? "en attente"} sur 3`
-            : `Score des règles : ${article.score} mots-clés correspondants`
-        }
-      >
-        <span>
-          {feedName || article.jev?.applied ? "INTÉRÊT JEV" : "CORRESPONDANCES"}
-        </span>
-        <strong>
-          {feedName || article.jev?.applied
-            ? (article.jev?.score ?? "—")
-            : article.score}
-        </strong>
-        {feedName || article.jev?.applied ? (
-          <small>
-            {article.jev ? "sur 3 · selon les consignes" : "analyse en attente"}
-          </small>
-        ) : (
-          <small>
-            mot{article.score > 1 ? "s" : ""}-clé{article.score > 1 ? "s" : ""}{" "}
-            selon les règles
-          </small>
-        )}
-      </div>
-      {showFolders && (
-        <ArticleFolders
-          article={article}
-          folders={folders}
-          busy={busy}
-          onAction={onAction}
-          onOpenFolders={onOpenFolders}
-        />
-      )}
-      <div className="article-actions">
-        <div className="reading-actions">
-          <button
-            type="button"
-            aria-pressed={article.isRead}
-            className={`article-action ${article.isRead ? "is-selected" : ""}`}
-            disabled={busy}
-            onClick={() =>
-              onAction({
-                action: "setRead",
-                id: article.id,
-                value: !article.isRead,
-              })
-            }
-          >
-            {article.isRead ? <Check size={15} /> : <Eye size={15} />}
-            {article.isRead ? "Lu" : "Marquer comme lu"}
-          </button>
-          <button
-            type="button"
-            aria-pressed={article.saved}
-            className={`article-action ${article.saved ? "is-selected" : ""}`}
-            disabled={busy}
-            onClick={() =>
-              onAction({
-                action: "setSaved",
-                id: article.id,
-                value: !article.saved,
-              })
-            }
-          >
-            <Bookmark
-              size={15}
-              fill={article.saved ? "currentColor" : "none"}
-            />
-            {article.saved ? "Sauvegardé" : "Sauvegarder"}
-          </button>
-        </div>
         <div
-          className="feedback-actions"
-          aria-label="Évaluer cette publication"
+          className="article-score"
+          aria-label={
+            feedName || article.jev?.applied
+              ? `Intérêt Jev : ${article.jev?.score ?? "en attente"} sur 3`
+              : `Score des règles : ${article.score} mots-clés correspondants`
+          }
         >
-          {feedbackOptions.map(({ value, label, icon: Icon }) => (
-            <button
-              key={value}
-              type="button"
-              aria-pressed={article.feedback === value}
-              title={
-                article.feedback === value
-                  ? "Retirer ce retour et réappliquer le mode de sélection"
-                  : value === "relevant"
-                    ? `Retenir cette publication dans ${feedName ?? "Pour moi"}`
-                    : `Retirer cette publication de ${feedName ?? "Pour moi"}`
-              }
-              className={`article-action feedback-action ${article.feedback === value ? "is-selected" : ""}`}
-              disabled={busy}
-              onClick={() =>
-                onAction({
-                  action: "setFeedback",
-                  id: article.id,
-                  value: article.feedback === value ? null : value,
-                })
-              }
-            >
-              <Icon size={14} />
-              {label}
-            </button>
-          ))}
+          <span>
+            {feedName || article.jev?.applied
+              ? "INTÉRÊT JEV"
+              : "CORRESPONDANCES"}
+          </span>
+          <strong>
+            {feedName || article.jev?.applied
+              ? (article.jev?.score ?? "—")
+              : article.score}
+          </strong>
+          {feedName || article.jev?.applied ? (
+            <small>
+              {article.jev
+                ? "sur 3 · selon les consignes"
+                : "analyse en attente"}
+            </small>
+          ) : (
+            <small>
+              mot{article.score > 1 ? "s" : ""}-clé
+              {article.score > 1 ? "s" : ""} selon les règles
+            </small>
+          )}
         </div>
-        {(grouped || article.keepSeparate) && (
-          <SeparateAction article={article} busy={busy} onAction={onAction} />
-        )}
-        <a
-          className="original-link"
-          href={article.url}
-          target="_blank"
-          rel="noreferrer"
-        >
-          Lire la source <ArrowUpRight size={14} />
-        </a>
       </div>
     </article>
   );

@@ -19,6 +19,8 @@ In **Environment Variables**, set each value as a **Runtime Variable**, with **B
 | `APP_PASSWORD_HASH`               | A bcrypt password hash generated below. In Coolify's Normal view, paste the hash alone and enable **Literal** to preserve `$`. |
 | `APP_PROXY_SECRET`                | An independent random 64-character hexadecimal secret, generated below.                                                        |
 | `DTM_COLLECTION_INTERVAL_MINUTES` | Minimum interval per source; `15` by default.                                                                                  |
+| `X_BEARER_TOKEN`                  | Optional X app-only Bearer Token; empty disables X API collection.                                                             |
+| `DTM_X_MONTHLY_BUDGET_USD`        | Your chosen X collection monthly cap; `0` by default.                                                                          |
 | `TYPESAFE_API_KEY`                | Optional Jev key; empty disables paid classification.                                                                          |
 | `DTM_JEV_MONTHLY_BUDGET_USD`      | Your chosen Jev monthly cap; `0` by default.                                                                                   |
 | `OPENAI_API_KEY`                  | Optional OpenAI key; empty disables generated summaries.                                                                       |
@@ -40,6 +42,8 @@ openssl rand -hex 32
 ```
 
 Save the password in your password manager. Save deployment secrets in Coolify, not Git. `APP_PROXY_SECRET` is supplied to both services; Compose maps it to `DTM_PROXY_SECRET` in the app. `APP_HOST` becomes `DTM_APP_ORIGIN=https://APP_HOST`. Local `.env.local` values are not uploaded automatically: copy only the runtime provider configuration you intend to retain. Keys and caps alone do not enable Jev mode or request a summary. A migrated database can retain an enabled Jev worker, collection schedule, and its spending ledger, so review them before starting it.
+
+X collection requires both `X_BEARER_TOKEN` and a positive `DTM_X_MONTHLY_BUDGET_USD`. With enabled X sources, an existing collection schedule can start paid reads after deployment. Keep the cap at `0` until ready. Create the token and configure a provider spending limit in the [X Developer Console](https://console.x.com/), following the [X setup guide](../README.md#x-accounts-optional). The app's estimate is separate from Jev and summaries, uses UTC calendar months, and covers only this database; X enforces its own spending limit by billing cycle. Check **Sources** for X configuration and usage before the first collection.
 
 The gateway preserves Host and Origin, overwrites `X-Dtm-Proxy-Secret`, and removes Authorization before forwarding to Next.js. Responses use `Cache-Control: private, no-store`; request bodies are limited to 65,536 bytes. Keep the app private on its Docker network and route all browser traffic through the gateway.
 
@@ -129,7 +133,7 @@ Keep an off-server backup before each update and note the deployed revision. Sto
 
 ## Restore or migrate local data
 
-First create a current backup. Restoring replaces all application data, including schedules and spending ledgers. Set both paid budgets to `0` in Coolify for the first start after restoration; review retained modes and current-month provider spending before enabling them again. A restored older ledger cannot account for charges made after its snapshot.
+First create a current backup. Restoring replaces all application data, including schedules and spending ledgers. Set `DTM_X_MONTHLY_BUDGET_USD`, `DTM_JEV_MONTHLY_BUDGET_USD`, and `DTM_SUMMARY_MONTHLY_BUDGET_USD` to `0` in Coolify for the first start after restoration; review retained modes and current-month provider spending before enabling them again. A restored older ledger cannot account for charges made after its snapshot.
 
 For migration from the Mac, stop the local app and any collection command, then use Node 24's same `backup()` API with `data/monitor.sqlite` as the source and a new file outside the project as the destination. Apply `PRAGMA journal_mode = DELETE` and `PRAGMA quick_check` to that destination as above, and close both connections before transfer. Do not upload `.env.local` or copy an active database without its WAL. Transfer the verified snapshot to a private location on the VPS.
 

@@ -1,0 +1,393 @@
+.heading-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.reading-view .main-content {
+  max-width: 1060px;
+  padding: 36px 44px 40px;
+}
+
+.reading-view .page-heading {
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.reading-view .page-heading h1 {
+  font-size: 1.75rem;
+  letter-spacing: -0.8px;
+  overflow-wrap: anywhere;
+}
+
+.reading-view .heading-actions .button {
+  background: transparent;
+  border-color: transparent;
+  color: #586a82;
+  font-weight: 500;
+  min-height: 44px;
+}
+
+.reading-view .heading-actions .button:hover {
+  background: #e9edf3;
+}
+
+.reading-toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.reading-toolbar .search-field {
+  flex: 1;
+  min-width: 0;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  height: 44px;
+}
+
+.reading-toolbar .search-field input {
+  width: 100%;
+  font-size: 0.875rem;
+  padding: 10px 0;
+}
+
+.reading-toolbar > .button {
+  flex-shrink: 0;
+  min-height: 44px;
+}
+
+.active-filter-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin: -6px 0 16px;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.active-filter-summary > span {
+  overflow-wrap: anywhere;
+}
+
+.active-filter-summary > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--blue);
+  background: transparent;
+  padding: 6px 0;
+  min-height: 36px;
+  flex-shrink: 0;
+}
+
+.feed-filters {
+  padding: 18px;
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  margin-bottom: 20px;
+}
+
+.feed-filters .filters {
+  border: 0;
+  padding: 0;
+  margin: 0 0 16px;
+  flex-wrap: wrap;
+}
+
+.feed-filters .activity-controls {
+  background: #f7f9fc;
+  margin-bottom: 12px;
+}
+
+.feed-filters .feed-display-controls {
+  margin: 0;
+}
+
+.feed-preferences {
+  margin-bottom: 24px;
+}
+
+.feed-preferences[hidden],
+.feed-filters[hidden],
+.reading-card-options[hidden] {
+  display: none;
+}
+
+.reading-view .article-list {
+  gap: 16px;
+}
+
+.article-card.reading-card {
+  display: block;
+  padding: 24px 28px 10px;
+  border-radius: 12px;
+}
+
+.reading-card .article-main {
+  padding: 0;
+}
+
+.reading-card .article-meta {
+  margin-bottom: 10px;
+  column-gap: 8px;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.reading-card .article-source {
+  font-weight: 600;
+  color: #54647a;
+}
+
+.reading-card h3 {
+  font-size: 1.375rem;
+  line-height: 1.4;
+  letter-spacing: -0.35px;
+  font-weight: 650;
+  max-width: none;
+  overflow-wrap: anywhere;
+}
+
+.reading-excerpt {
+  margin: 12px 0 0;
+  font-size: 1rem;
+  line-height: 1.7;
+  color: #526175;
+  overflow-wrap: anywhere;
+}
+
+.reading-card-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.reading-source-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #4568a5;
+  font-size: 0.8125rem;
+  font-weight: 550;
+  min-height: 44px;
+}
+
+.reading-source-link:hover {
+  color: var(--blue);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.reading-quick-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.reading-icon-action {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  color: #7a879a;
+  background: transparent;
+}
+
+.reading-icon-action:hover,
+.reading-icon-action[aria-pressed="true"],
+.reading-icon-action[aria-expanded="true"] {
+  background: var(--blue-light);
+  color: var(--blue);
+}
+
+.reading-card-options {
+  border-top: 1px solid var(--line);
+  margin-top: 6px;
+  padding: 16px 0 8px;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.reading-provenance {
+  font-size: 0.75rem;
+}
+
+.reading-card-options .feedback-actions {
+  border: 0;
+  padding: 0;
+  gap: 16px;
+  margin: 8px 0;
+}
+
+.reading-card-options .analysis-details {
+  margin: 12px 0;
+}
+
+.reading-card-options .article-score {
+  width: fit-content;
+  margin: 12px 0 0;
+}
+
+.reading-original-excerpt {
+  margin: 10px 0;
+}
+
+.reading-original-excerpt > summary {
+  cursor: pointer;
+  width: fit-content;
+  padding: 6px 0;
+}
+
+.reading-original-excerpt > p {
+  margin-top: 8px;
+  font-size: 0.9375rem;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.story-card.reading-story {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.reading-story > .reading-card {
+  border: 0;
+}
+
+.reading-story-members {
+  padding: 0 28px 12px;
+}
+
+.reading-story-members > summary {
+  color: #536d95;
+  cursor: pointer;
+  font-size: 0.8125rem;
+  padding: 8px 0;
+}
+
+.reading-story-members > summary svg {
+  vertical-align: -3px;
+  margin-right: 5px;
+}
+
+.reading-story-members > .reading-card {
+  margin-top: 12px;
+}
+
+.reading-story-members > .story-caution {
+  margin: 8px 0;
+}
+
+@media (max-width: 700px) {
+  .reading-view .main-content {
+    padding: 20px 16px 24px;
+  }
+
+  .reading-view .page-heading {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .reading-view .page-heading > div:first-child {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .reading-view .page-heading h1 {
+    font-size: 1.5rem;
+  }
+
+  .heading-actions {
+    flex-wrap: wrap;
+  }
+
+  .reading-view .heading-actions {
+    flex-wrap: nowrap;
+    gap: 0;
+  }
+
+  .reading-view .heading-actions .button {
+    font-size: 0;
+    width: 44px;
+    padding: 0;
+    gap: 0;
+  }
+
+  .reading-view .heading-actions .button > span {
+    font-size: 0;
+  }
+
+  .reading-toolbar {
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .reading-toolbar .search-field {
+    padding: 0 10px;
+    gap: 8px;
+  }
+
+  .reading-toolbar .search-field input {
+    font-size: 1rem;
+  }
+
+  .reading-toolbar > .button {
+    padding: 10px;
+    gap: 5px;
+  }
+
+  .article-card.reading-card {
+    padding: 19px 18px 7px;
+  }
+
+  .reading-card h3 {
+    font-size: 1.1875rem;
+    line-height: 1.45;
+  }
+
+  .reading-excerpt {
+    font-size: 0.9375rem;
+    line-height: 1.65;
+    margin-top: 10px;
+  }
+
+  .reading-card-actions {
+    gap: 4px;
+    margin-top: 9px;
+  }
+
+  .reading-quick-actions {
+    gap: 0;
+  }
+
+  .reading-story-members {
+    padding: 0 18px 12px;
+  }
+
+  .reading-story-members > .reading-card {
+    padding: 15px 12px 5px;
+  }
+
+  .active-filter-summary {
+    flex-wrap: wrap;
+    gap: 0;
+  }
+
+  .feed-filters {
+    padding: 12px;
+  }
+}

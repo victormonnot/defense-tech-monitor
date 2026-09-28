@@ -11,7 +11,7 @@ export interface FeedEntry {
   text: string;
   excerpt: string | null;
   language: string;
-  format: "article" | "video";
+  format: "article" | "video" | "post";
   contentHash: string;
   contentBasis?: ContentBasis;
 }

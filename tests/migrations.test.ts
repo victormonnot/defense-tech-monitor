@@ -49,6 +49,7 @@ function removeSummarySchema(db: DatabaseSync) {
 }
 
 function removeArticleContentSchema(db: DatabaseSync) {
+  db.exec("DROP TABLE x_sources; DROP TABLE x_requests;");
   db.exec("DROP VIEW article_inputs; DROP TABLE article_content;");
 }
 
@@ -108,7 +109,7 @@ test("version 1 upgrades preserve publications, personal state, profile and sour
   const upgraded = new MonitorStore(path);
   assert.equal(
     upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
-    10,
+    11,
   );
   assert.deepEqual(upgraded.snapshot().articles, before);
   assert.equal(upgraded.snapshot().activity.newCount, 0);
@@ -139,7 +140,7 @@ test("fresh migrations are idempotent and reject newer schemas without downgradi
   try {
     migrate(db);
     migrate(db);
-    assert.equal(db.prepare("PRAGMA user_version").get()?.user_version, 10);
+    assert.equal(db.prepare("PRAGMA user_version").get()?.user_version, 11);
     const startedAt = db
       .prepare("SELECT value FROM settings WHERE key='activity_started_at'")
       .get()?.value;
@@ -201,7 +202,7 @@ test("version 2 upgrades add reversible grouping preferences without changing ex
   try {
     assert.equal(
       upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
-      10,
+      11,
     );
     const after = upgraded.snapshot();
     assert.deepEqual(
@@ -270,7 +271,7 @@ test("version 3 upgrades baseline existing articles without changing personal or
     const after = upgraded.snapshot();
     assert.equal(
       upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
-      10,
+      11,
     );
     assert.deepEqual(
       { ...after, activity: undefined },
@@ -338,7 +339,7 @@ test("version 4 upgrades preserve publications, activity and preferences without
   try {
     assert.equal(
       upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
-      10,
+      11,
     );
     assert.deepEqual(upgraded.snapshot(), before);
     assert.deepEqual(upgraded.snapshot().folders, []);
@@ -388,7 +389,7 @@ test("version 5 upgrades add a paused schedule without changing articles, dossie
   try {
     assert.equal(
       upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
-      10,
+      11,
     );
     assert.deepEqual(upgraded.snapshot(), before);
     assert.deepEqual(upgraded.snapshot().collection, {
@@ -442,7 +443,7 @@ test("version 6 upgrades default Jev to off without changing existing data or st
   try {
     assert.equal(
       upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
-      10,
+      11,
     );
     assert.deepEqual(upgraded.snapshot(), before);
     assert.equal(upgraded.snapshot().jev?.mode, "off");
@@ -512,7 +513,7 @@ test("version 7 upgrades seed only the general feed and preserve cached judgment
   try {
     assert.equal(
       upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
-      10,
+      11,
     );
     assert.deepEqual(
       upgraded.db.prepare("SELECT * FROM jev_cache").all(),
@@ -615,7 +616,7 @@ test("version 8 upgrades add empty summary tables while preserving every existin
   try {
     assert.equal(
       upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
-      10,
+      11,
     );
     assert.deepEqual(upgraded.snapshot(), before);
     assert.deepEqual(
@@ -724,7 +725,7 @@ test("version 9 upgrades preserve every existing row and cached result while add
   try {
     assert.equal(
       upgraded.db.prepare("PRAGMA user_version").get()?.user_version,
-      10,
+      11,
     );
     assert.deepEqual(
       tables.map((table) =>

@@ -11,6 +11,7 @@ import { parseCollectionSchedule } from "@/lib/collection-state";
 import { setJevMode, retryJevFailures } from "@/lib/jev-store";
 import { parseFeedInput } from "@/lib/custom-feeds";
 import { processArticleSummary } from "@/lib/summary-service";
+import { parseXAccount } from "@/lib/x-client";
 import {
   assertRequestAccess,
   assertRequestOrigin,
@@ -171,10 +172,20 @@ export async function POST(request: NextRequest) {
       }
       case "addSource": {
         const name = text(body.name, "Nom", 120);
-        const siteUrl = canonicalUrl(
-          text(body.siteUrl, "Adresse du site", 2000),
-        );
+        const rawSiteUrl = text(body.siteUrl, "Adresse du site", 2000);
+        const account = parseXAccount(rawSiteUrl);
+        const explicitFeed =
+          typeof body.feedUrl === "string" && body.feedUrl.trim();
+        const siteUrl =
+          account && !explicitFeed ? account.url : canonicalUrl(rawSiteUrl);
         validateRemoteUrl(siteUrl);
+        if (
+          !account &&
+          /(^|\.)((x|twitter)\.com)$/i.test(new URL(siteUrl).hostname)
+        )
+          throw new Error(
+            "Indiquez l’adresse d’un profil X, par exemple https://x.com/nomducompte.",
+          );
         const feedUrl =
           typeof body.feedUrl === "string" && body.feedUrl.trim()
             ? publicUrl(body.feedUrl.trim())

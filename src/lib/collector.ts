@@ -3,6 +3,9 @@ import { resolveCollection } from "./connectors";
 import { fetchResource, type HttpResult } from "./network";
 import { getStore, type MonitorStore } from "./store";
 import { collectArticleContent } from "./article-content-collector";
+import { collectXSource } from "./x-collector";
+import type { XFetch } from "./x-client";
+import type { XConfig } from "./x-store";
 import {
   COLLECTION_HEARTBEAT_MS,
   CollectionLeaseError,
@@ -37,7 +40,12 @@ export async function collectSources(
   store: MonitorStore = getStore(),
   fetcher: FetchResource = fetchResource,
   intervalMinutes = Number(process.env.DTM_COLLECTION_INTERVAL_MINUTES ?? 15),
-  options: { trigger?: "manual" | "cli"; now?: () => number } = {},
+  options: {
+    trigger?: "manual" | "cli";
+    now?: () => number;
+    xFetch?: XFetch;
+    xConfig?: XConfig;
+  } = {},
 ): Promise<CollectionResult> {
   return (await runCollection(
     store,
@@ -45,6 +53,7 @@ export async function collectSources(
     intervalMinutes,
     options.trigger ?? "manual",
     options.now ?? Date.now,
+    options,
   ))!;
 }
 
@@ -63,6 +72,7 @@ async function runCollection(
   intervalMinutes: number,
   trigger: CollectionRun["trigger"],
   now: () => number,
+  xOptions: { xFetch?: XFetch; xConfig?: XConfig } = {},
 ): Promise<CollectionResult | null> {
   const validInterval =
     Number.isFinite(intervalMinutes) && intervalMinutes >= 1;
@@ -145,6 +155,24 @@ async function runCollection(
             .run(checkedAt, source.id),
         );
         result.checked++;
+        if (target.kind === "x") {
+          const changes = await collectXSource(
+            store,
+            source,
+            target.username,
+            {
+              assert: () => {
+                assertLease();
+                assertSource();
+              },
+              write: writeSource,
+            },
+            { fetcher: xOptions.xFetch, config: xOptions.xConfig, now },
+          );
+          result.added += changes.added;
+          result.updated += changes.updated;
+          continue;
+        }
         const cache = store.db
           .prepare(
             "SELECT etag,last_modified,last_feed_count FROM sources WHERE id=?",

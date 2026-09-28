@@ -2,6 +2,7 @@ import type { StoryGroup, StoryRelation } from "./stories";
 import type { JevAnalysis, JevMode, JevState } from "./jev-types";
 import type { CustomFeed, FeedInput } from "./custom-feeds";
 import type { ArticleSummary, SummaryState } from "./summary-types";
+import type { XState } from "./x-store";
 
 export type Feedback = "relevant" | "off_topic" | "seen";
 export type SourceStatus = "pending" | "ok" | "empty" | "error" | "unsupported";
@@ -16,7 +17,7 @@ export interface Source {
   name: string;
   siteUrl: string;
   feedUrl: string | null;
-  collectionKind: "rss" | "website" | "unsupported";
+  collectionKind: "rss" | "website" | "x" | "unsupported";
   collectionUrl: string | null;
   language: string;
   enabled: boolean;
@@ -40,7 +41,7 @@ export interface Article {
   revision: number;
   changeKind: "new" | "updated" | null;
   language: string;
-  format: "article" | "video";
+  format: "article" | "video" | "post";
   themes: string[];
   excerpt: string | null;
   contentBasis: ContentBasis;
@@ -135,6 +136,7 @@ export interface Snapshot {
   jev?: JevState;
   customFeeds?: CustomFeed[];
   summaries?: SummaryState;
+  x?: XState;
   activity: {
     startedAt: string;
     lastReviewedAt: string | null;

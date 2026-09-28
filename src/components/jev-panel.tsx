@@ -390,11 +390,13 @@ export function JevArticleIndicator({
               ? article.excerpt
                 ? "titre et extrait disponible"
                 : "titre uniquement, aucun extrait disponible"
-              : article.contentBasis === "feed_text"
-                ? "titre et texte fourni par le flux"
-                : article.contentBasis === "page_text"
-                  ? "titre et texte extrait de la page de l’article"
-                  : "titre et extrait de la page publique"}
+              : article.format === "post"
+                ? "texte publié sur X"
+                : article.contentBasis === "feed_text"
+                  ? "titre et texte fourni par le flux"
+                  : article.contentBasis === "page_text"
+                    ? "titre et texte extrait de la page de l’article"
+                    : "titre et extrait de la page publique"}
           .{analysis.truncated && " Texte raccourci pour l’analyse."} Le contenu
           intégral de l’article n’est pas toujours disponible. Le score mesure
           l’intérêt, sans vérifier les faits.

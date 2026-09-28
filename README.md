@@ -2,7 +2,7 @@
 
 A personal monitoring application for following developments in drones, robotics, and defense technology from sources you choose.
 
-Publications are collected through RSS/Atom or dedicated public-page connectors, stored locally, and selected using an editable keyword profile or Jev-powered feeds with individual written briefs. Each publication retains its original title, source, language, and link. The interface distinguishes feed text, article-page text, listing excerpts, and titles with metadata only.
+Publications are collected through RSS/Atom, dedicated public-page connectors, or the optional official X API, stored locally, and selected using an editable keyword profile or Jev-powered feeds with individual written briefs. Source text, language, and original links remain available. The interface identifies the content available for analysis.
 
 ## Getting started
 
@@ -15,7 +15,7 @@ npm run collect
 npm run dev
 ```
 
-Open the address shown in the terminal, usually `http://127.0.0.1:3000`. The SQLite database is created automatically at `data/monitor.sqlite`. The default keyword mode requires no API key and makes no paid calls. Jev and on-demand French summaries each require separate local configuration.
+Open the address shown in the terminal, usually `http://127.0.0.1:3000`. The SQLite database is created automatically at `data/monitor.sqlite`. The default keyword mode and website/feed collection require no API key and make no paid calls. Optional X collection, Jev, and on-demand French summaries each require separate local configuration.
 
 To run the checks and a production build locally:
 
@@ -39,8 +39,12 @@ The interface currently uses French labels:
 - **Saved — Sauvegardés**: bookmarked publications, preserved across restarts.
 - **Folders — Dossiers**: organize publications into named folders and browse their contents with the usual feed filters.
 - **Evaluate — Évaluer**: review unjudged publications, find relevant items missed by the rules, inspect rule matches you marked off-topic, or revisit all your feedback. Publications are displayed individually in this view.
-- **Sources**: add websites or feeds, edit their configuration, enable or disable individual sources, configure automatic collection, and inspect the collection method, address, status, and errors.
+- **Sources**: add websites, feeds, or public X accounts, edit their configuration, enable or disable individual sources, configure automatic collection, and inspect the collection method, address, status, and errors.
 - **Monitoring profile — Profil de veille**: keywords, exclusions, the minimum number of matches required, and the content used for selection. An exclusion keyword rejects an article under the rules; explicitly marking it relevant overrides that decision for your personal feed.
+
+Reading views open directly on publications, with search and a collapsible **Filters — Filtres** panel. Active filters remain visible when the panel is closed; change-review and grouping controls are inside it. **Customize — Personnaliser** opens the feed brief and thresholds without discarding an unsaved draft when closed.
+
+Article previews prioritize the title and available source excerpt. A cached French summary replaces the excerpt in the preview, with an AI label and an option to expand longer summaries. The original excerpt remains accessible under article options. Read and save controls are always available; the **…** button reveals folders, feedback, content provenance, relevance scores and related publications. Other publications grouped under the same probable announcement can be expanded individually. Opening these controls does not generate a summary or change reading state.
 
 Start collection with **Refresh sources — Actualiser les sources** or `npm run collect`. You can also enable automatic collection under **Sources**.
 
@@ -91,7 +95,7 @@ The budget above is an example; choose your own limit from 0 to 100 USD, with at
 - **Compare with rules — Comparer aux règles**: analyze enabled feeds in the background. Custom feeds use their own scores while the general For me feed continues to use keyword rules.
 - **Use in For me — Utiliser dans Pour moi**: the general feed applies its own relevance and confidence thresholds. Missing or uncertain classifications fall back to keywords. Custom feeds only select usable results or explicit positive feedback, without borrowing the general keyword rules.
 
-Open **Consignes et réglages** on For me or a custom feed to edit what you want to see, what to avoid, the minimum interest score (0–3), the minimum confidence (0–100%), and relevance/date ordering. The starting thresholds of 1.5 and 60% are editable defaults, not calibrated accuracy guarantees. The score measures fit to the brief; a short announcement can score highly without engineering detail. Confidence describes uncertainty in the model’s classification, not source reliability.
+Open **Customize — Personnaliser** on For me or a custom feed to edit what you want to see, what to avoid, the minimum interest score (0–3), the minimum confidence (0–100%), and relevance/date ordering. The starting thresholds of 1.5 and 60% are editable defaults, not calibrated accuracy guarantees. The score measures fit to the brief; a short announcement can score highly without engineering detail. Confidence describes uncertainty in the model’s classification, not source reliability.
 
 Create feeds under **Mes fils** using editable Drones, Ukraine news, and Startups presets, or a custom brief. One article can receive different scores in several feeds while retaining shared reading, bookmark, folder, and change-review state. Feedback within a custom feed applies only to that feed; general feedback remains attached to For me. Feedback never automatically trains the model. No labeling exercise is required. Archiving a custom feed preserves its settings, cached results and feedback and stops new analyses; restore it from Mes fils. The general feed cannot be archived or renamed.
 
@@ -197,11 +201,35 @@ Article retrieval is bounded to 10 pages per source and 20 pages per collection,
 
 Retrieval uses the same public-address validation, request size limits, timeouts, and robots.txt checks as source collection, and rejects redirects to a different article. It sends no account cookies or API credentials and does not unlock subscriber content. The original feed/listing data is preserved separately. A temporary failure keeps the last successfully retrieved text; changed article URLs or languages cannot reuse an old page body. Updates preserve reading states, folders and feedback, but invalidate analyses and summaries based on older input. Enabled Jev feeds may therefore require new analyses within their existing budget; French summaries remain on demand.
 
-Collection respects `robots.txt`, limits response size, applies timeouts, and validates network destinations, including redirects. Failed sources retain previously collected articles and display their errors. Conditional HTTP requests (`ETag`, `Last-Modified`) and content hashes reduce repeated processing.
+Website and feed collection respects `robots.txt`, limits response size, applies timeouts, and validates network destinations, including redirects. Failed sources retain previously collected articles and display their errors. Conditional HTTP requests (`ETag`, `Last-Modified`) and content hashes reduce repeated processing.
+
+### X accounts (optional)
+
+Add public X accounts under **Sources** using an `@handle` or a profile URL such as `https://x.com/handle`. The connector uses X's official API to read their posts; adding or editing an account does not look it up or make a paid request. The first lookup happens during a manual, scheduled, or command-line collection, only with a Bearer Token and a positive budget. Website and feed collection continue to work without X configuration.
+
+To configure access:
+
+1. Sign in to the [X Developer Console](https://console.x.com/), complete developer registration, and create an app for your monitoring use case.
+2. Generate the app's **Bearer Token** for app-only public-data access. Keep it on the server; this connector does not use your X password, browser session, or a user sign-in flow. See X's [app and credential guide](https://docs.x.com/fundamentals/developer-apps).
+3. Add API credits and set a provider spending limit in the console. X documents usage-based billing without a subscription. Rates checked on September 28, 2026 are **$0.005 per post** and **$0.010 per user lookup resource**; confirm current prices before funding the account. See [X pricing and spending limits](https://docs.x.com/x-api/getting-started/pricing).
+4. Set the following in the Git-ignored `.env.local` and restart the server, or configure them as Coolify runtime variables:
+
+```dotenv
+X_BEARER_TOKEN=your_app_bearer_token_here
+DTM_X_MONTHLY_BUDGET_USD=1
+```
+
+The cap above is an example; choose an amount from 0 to 1,000 USD. The default is `0`, which blocks paid X reads. The token is never returned to the browser or stored in SQLite. Once configured, an enabled collection schedule can read enabled X sources; keep collection paused or the cap at `0` until ready.
+
+The first successful import takes one page of up to 10 recent posts, excluding replies and reposts. It establishes a starting point without importing the older archive. Later collections request newer posts, at most one page of 10 per account per collection. Stored pagination and post-ID cursors allow a backlog to continue across subsequent collections and restarts. X's timeline availability and access limits still apply; this is not an exhaustive historical import. See the [official timeline documentation](https://docs.x.com/x-api/posts/timelines/introduction).
+
+**Sources** shows X's separate monthly spending estimate. Before a request, a transaction reserves up to $0.010 for account lookup or $0.050 for a 10-post page. Near the cap, pages shrink to fit the remaining budget; less than $0.025 cannot reserve the minimum five-post page. Valid responses settle against returned resource counts; interrupted or uncertain requests retain their reservation. The ledger follows the UTC month in which a request starts. It does not assume provider discounts or deduplication, and it does not include spending by other applications or databases. Use X's console spending limit for the provider-enforced limit; its billing cycle can differ from this local calendar-month guard.
+
+The connector requests no related-resource expansions and imports available post text and original links. It does not download or play media, expand threads, retrieve linked article pages, or synchronize later edits and deletions. Collected posts use the existing read/save/folder controls and optional Jev selection. French summaries remain explicit and follow the same content checks: short posts below the 400-character minimum cannot be summarized.
 
 ## Data and limitations
 
-- Displayed publications come from real feeds and supported public pages. Only tests use synthetic data.
+- Displayed publications come from real feeds, supported public pages, and configured X accounts through the official API. Only tests use synthetic data.
 - Publication and collection timestamps are separate. Unknown publication dates remain unknown.
 - Available feed and article-page text is analyzed up to a limit of 20,000 characters and is not necessarily the complete article. Article extraction is restricted to recognized public editorial elements; scripts, embedded data bodies, menus, recommendations, and explicit access restrictions are excluded. When extraction is unavailable, the listing title and any original excerpt remain usable. The interface identifies the content used for analysis and displays excerpts of up to 400 characters; the API does not expose the stored article body. Metadata-only publications have no excerpt or generated summary.
 - Full articles are not republished. The application does not bypass paywalls, transcribe videos, or invent summaries from titles.
@@ -210,7 +238,7 @@ Collection respects `robots.txt`, limits response size, applies timeouts, and va
 - This version does not include exhaustive archive imports, alerts, or audio.
 - The database and `.env` files are excluded from Git. The example configuration contains no secrets. To back up local data, stop the application and copy the `data/` directory.
 
-Existing databases are upgraded automatically to schema version 10 when opened. Migrations add content provenance, a per-publication grouping preference, revision-based change tracking, folder storage, collection scheduling, optional Jev cache/accounting, editable feeds with independent feedback, a separate summary cache and usage ledger, and an article-page content cache while preserving existing publications and personal state. Groups are derived from the current publications; they do not merge or delete database records.
+Existing databases are upgraded automatically to schema version 11 when opened. Migrations add content provenance, a per-publication grouping preference, revision-based change tracking, folder storage, collection scheduling, optional Jev cache/accounting, editable feeds with independent feedback, a separate summary cache and usage ledger, an article-page content cache, and X account cursors and request accounting while preserving existing publications and personal state. Groups are derived from the current publications; they do not merge or delete database records.
 
 ## Architecture
 
@@ -219,6 +247,9 @@ A [Next.js](https://nextjs.org/docs) monolith with React and TypeScript serves t
 ```text
 src/lib/network.ts                HTTP, allowed destinations, and robots.txt
 src/lib/feed.ts                   RSS/Atom discovery and normalization
+src/lib/x-client.ts               Official X API requests and public post normalization
+src/lib/x-store.ts                X account cursors, budget reservations, and usage ledger
+src/lib/x-collector.ts            Bounded initial imports and incremental X collection
 src/lib/connectors/               Brave1 and Defender Media listing/article extraction
 src/lib/article-content-collector.ts Bounded article retrieval and conditional refresh
 src/lib/article-content-store.ts  Public text cache without overwriting listing data
@@ -251,4 +282,4 @@ scripts/collect.ts                Command-line collection
 tests/                            RSS/Atom, duplicates, selection, and error cases
 ```
 
-Collection, classification, and summary generation are separate concerns. The synchronous `Classifier` contract handles local rules; remote Jev requests run in the background. OpenAI summaries run only on demand, with their own configuration, usage ledger and cache. Snapshots read persisted results without calling either provider.
+Collection, classification, and summary generation are separate concerns. The synchronous `Classifier` contract handles local rules; remote Jev requests run in the background. X reads run through collection with separate configuration and accounting. OpenAI summaries run only on demand, with their own configuration, usage ledger and cache. Snapshots read persisted results without calling external providers.

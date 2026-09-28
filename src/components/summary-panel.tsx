@@ -1,5 +1,6 @@
 "use client";
 
+import { useId, useState } from "react";
 import {
   ArrowRight,
   CircleAlert,
@@ -9,8 +10,9 @@ import {
   RefreshCw,
 } from "lucide-react";
 import type { Article } from "@/lib/types";
-import type { SummaryState } from "@/lib/summary-types";
+import type { ArticleSummary, SummaryState } from "@/lib/summary-types";
 import { isSummaryModel, SUMMARY_MODELS } from "@/lib/summary-models";
+import styles from "./summary-preview.module.css";
 
 function dollars(value: number) {
   return new Intl.NumberFormat("fr-FR", {
@@ -34,6 +36,30 @@ function generatedDate(value?: string) {
         timeStyle: "short",
       }).format(date)
     : null;
+}
+
+function sourceLabel(article: Article) {
+  return article.format === "post"
+    ? "Texte publié sur X."
+    : article.contentBasis === "feed_text"
+      ? "Texte fourni par le flux."
+      : article.contentBasis === "page_text"
+        ? "Texte extrait de la page publique de l’article."
+        : article.contentBasis === "page_excerpt"
+          ? "Extrait de la page publique."
+          : "Informations disponibles dans la publication collectée.";
+}
+
+function previewText(text: string) {
+  if (text.length <= 500) return text;
+  let boundary = 460;
+  while (boundary > 0 && !/\s/u.test(text[boundary])) boundary--;
+  if (boundary === 0) {
+    const followingSpace = text.slice(460).search(/\s/u);
+    if (followingSpace === -1) return text;
+    boundary = 460 + followingSpace;
+  }
+  return `${text.slice(0, boundary).trimEnd()}…`;
 }
 
 export function SummaryPanel({ state }: { state?: SummaryState }) {
@@ -151,12 +177,14 @@ export function ArticleSummaryPanel({
   pending,
   onGenerate,
   onOpenProfile,
+  compact = false,
 }: {
   article: Article;
   busy: boolean;
   pending: boolean;
   onGenerate: () => void;
   onOpenProfile: () => void;
+  compact?: boolean;
 }) {
   const summary = article.summary;
   if (!summary) return null;
@@ -164,10 +192,29 @@ export function ArticleSummaryPanel({
   const date = generatedDate(summary.generatedAt);
   if (loading)
     return (
-      <div className="article-summary-pending" role="status">
+      <div
+        className={compact ? styles.pending : "article-summary-pending"}
+        role="status"
+      >
         <LoaderCircle size={16} className="spin" />
         <span>Résumé en cours…</span>
       </div>
+    );
+
+  if (compact)
+    return summary.status === "ready" && summary.text ? (
+      <CompactReadySummary
+        article={article}
+        summary={summary}
+        text={summary.text}
+      />
+    ) : (
+      <CompactSummaryAction
+        summary={summary}
+        busy={busy}
+        onGenerate={onGenerate}
+        onOpenProfile={onOpenProfile}
+      />
     );
 
   if (summary.status === "ready" && summary.text)
@@ -188,13 +235,7 @@ export function ArticleSummaryPanel({
         <details className="article-summary-details">
           <summary>À partir de quel contenu ?</summary>
           <p>
-            {article.contentBasis === "feed_text"
-              ? "Texte fourni par le flux."
-              : article.contentBasis === "page_text"
-                ? "Texte extrait de la page publique de l’article."
-                : article.contentBasis === "page_excerpt"
-                  ? "Extrait de la page publique."
-                  : "Informations disponibles dans la publication collectée."}
+            {sourceLabel(article)}
             {summary.truncated &&
               " Le texte transmis a été raccourci pour le résumé."}{" "}
             Le contenu intégral de l’article n’est pas nécessairement
@@ -248,6 +289,150 @@ export function ArticleSummaryPanel({
         >
           Voir les réglages des résumés <ArrowRight size={13} />
         </button>
+      )}
+    </div>
+  );
+}
+
+function CompactReadySummary({
+  article,
+  summary,
+  text,
+}: {
+  article: Article;
+  summary: ArticleSummary;
+  text: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const textId = useId();
+  const excerpt = previewText(text);
+  const canExpand = excerpt !== text;
+  const date = generatedDate(summary.generatedAt);
+
+  return (
+    <section className={styles.ready} aria-label="Résumé en français">
+      <div className={styles.heading}>
+        <span>Résumé en français</span>
+        <span
+          className={styles.aiLabel}
+          aria-label="Généré par intelligence artificielle"
+        >
+          IA
+        </span>
+      </div>
+      <p className={styles.text} id={textId}>
+        {expanded ? text : excerpt}
+      </p>
+      {canExpand && (
+        <button
+          type="button"
+          className={styles.expand}
+          aria-expanded={expanded}
+          aria-controls={textId}
+          onClick={() => setExpanded(!expanded)}
+        >
+          {expanded ? "Réduire le résumé" : "Lire la suite du résumé"}
+        </button>
+      )}
+      <details className={styles.details}>
+        <summary>Détails du résumé</summary>
+        <p>Résumé du texte disponible, généré avec OpenAI.</p>
+        <dl>
+          <div>
+            <dt>Contenu</dt>
+            <dd>{sourceLabel(article)}</dd>
+          </div>
+          {date && (
+            <div>
+              <dt>Généré le</dt>
+              <dd>
+                <time dateTime={summary.generatedAt}>{date}</time>
+              </dd>
+            </div>
+          )}
+          {summary.model && (
+            <div>
+              <dt>Modèle</dt>
+              <dd>{modelLabel(summary.model)}</dd>
+            </div>
+          )}
+        </dl>
+        {summary.truncated && (
+          <p>Le texte transmis a été raccourci pour le résumé.</p>
+        )}
+        <p>
+          Le contenu intégral n’est pas nécessairement disponible. Ce résumé
+          reformule la source sans vérification indépendante.
+        </p>
+      </details>
+    </section>
+  );
+}
+
+function CompactSummaryAction({
+  summary,
+  busy,
+  onGenerate,
+  onOpenProfile,
+}: {
+  summary: ArticleSummary;
+  busy: boolean;
+  onGenerate: () => void;
+  onOpenProfile: () => void;
+}) {
+  const insufficient = summary.status === "insufficient";
+  const failed = summary.status === "failed";
+  const canGenerate = summary.canGenerate && !insufficient;
+  const reason =
+    summary.reason ??
+    (insufficient
+      ? "Le texte collecté est trop court pour produire un résumé. Consultez la publication originale."
+      : failed
+        ? "Le résumé n’a pas pu être généré. Vous pouvez réessayer."
+        : "Les résumés ne sont pas disponibles pour le moment.");
+
+  return (
+    <div className={styles.actions}>
+      {canGenerate && (
+        <button
+          type="button"
+          className={styles.action}
+          disabled={busy}
+          onClick={onGenerate}
+        >
+          {failed ? <RefreshCw size={14} /> : <Languages size={14} />}
+          {failed ? "Réessayer le résumé" : "Résumer en français"}
+        </button>
+      )}
+      {(!canGenerate || summary.reason || failed) && (
+        <details className={styles.reason}>
+          <summary>
+            {insufficient ? (
+              <FileText size={14} />
+            ) : failed ? (
+              <CircleAlert size={14} />
+            ) : (
+              <Languages size={14} />
+            )}
+            {insufficient
+              ? "Résumé indisponible"
+              : failed
+                ? "Pourquoi l’échec ?"
+                : canGenerate
+                  ? "À propos du résumé"
+                  : "Résumer en français"}
+          </summary>
+          <p>{reason}</p>
+          {!summary.canGenerate && !insufficient && (
+            <button
+              type="button"
+              className={styles.settingsLink}
+              onClick={onOpenProfile}
+            >
+              Voir les réglages des résumés <ArrowRight size={12} />
+            </button>
+          )}
+        </details>
       )}
     </div>
   );

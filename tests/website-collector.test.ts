@@ -109,6 +109,7 @@ test("explicit feeds take precedence and only supported English pages receive we
     assert.equal(resolveCollection(site, null), null);
   }
   const target = resolveCollection("https://brave1.gov.ua/en", null)!;
+  assert.equal(target.kind, "website");
   assert.throws(
     () => target.parse(brave1, "https://brave1.gov.ua/uk/news", "en"),
     /redirigé/,

@@ -26,7 +26,9 @@ npm run build
 npm start
 ```
 
-The application uses one personal profile. Local commands bind to the loopback interface and reject external hostnames by default. For private HTTPS access on a VPS, follow the [Coolify deployment guide](deploy/README.md), which provides an authenticated gateway, persistent SQLite storage, and backup and restore instructions.
+The application uses one personal profile. Local commands bind to the loopback interface and reject external hostnames by default. The [Coolify deployment guide](deploy/README.md) provides a public reading page and a password-protected `/admin` workspace over HTTPS, with persistent SQLite storage and backup and restore instructions.
+
+On the hosted site, visitors can browse collected publications, filter by source, search, and read existing French summaries. Public reads never request collection or generate summaries. Personal settings, feed briefs, folders, reading states, feedback, and provider usage remain in `/admin`; only authenticated administrators can change them or request paid work. The public view contains all collected publications, independently of the personal selection, with original source links and bounded excerpts rather than stored full article bodies.
 
 ## Usage
 

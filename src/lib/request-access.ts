@@ -3,11 +3,13 @@ import { timingSafeEqual } from "node:crypto";
 export type RequestAccessEnvironment = {
   DTM_APP_ORIGIN?: string;
   DTM_PROXY_SECRET?: string;
+  DTM_PUBLIC_READ_ONLY?: string;
 };
 
 export type RequestAccessContext = {
   mode: "local" | "hosted";
   origin: string;
+  role?: "public" | "admin";
 };
 
 export class RequestAccessError extends Error {
@@ -34,19 +36,39 @@ function denied(): never {
   );
 }
 
+/** An explicit invalid mode must never silently restore private-page access. */
+export function isPublicReadOnlyEnabled(
+  environment: Pick<RequestAccessEnvironment, "DTM_PUBLIC_READ_ONLY"> = {
+    DTM_PUBLIC_READ_ONLY: process.env.DTM_PUBLIC_READ_ONLY,
+  },
+): boolean {
+  const value = environment.DTM_PUBLIC_READ_ONLY;
+  if (value === undefined || value === "0") return false;
+  if (value === "1") return true;
+  invalidConfiguration();
+}
+
 /** Check the connection boundary before reading a body or opening personal data. */
 export function assertRequestAccess(
   request: Request,
   environment: RequestAccessEnvironment = {
     DTM_APP_ORIGIN: process.env.DTM_APP_ORIGIN,
     DTM_PROXY_SECRET: process.env.DTM_PROXY_SECRET,
+    DTM_PUBLIC_READ_ONLY: process.env.DTM_PUBLIC_READ_ONLY,
   },
 ): RequestAccessContext {
   const configuredOrigin = environment.DTM_APP_ORIGIN;
   const secret = environment.DTM_PROXY_SECRET;
   const host = request.headers.get("host");
+  const publicReadOnly = isPublicReadOnlyEnabled(environment);
+  if (!publicReadOnly && request.headers.has("x-dtm-access"))
+    invalidConfiguration();
 
-  if (configuredOrigin !== undefined || secret !== undefined) {
+  if (
+    configuredOrigin !== undefined ||
+    secret !== undefined ||
+    publicReadOnly
+  ) {
     if (
       typeof configuredOrigin !== "string" ||
       typeof secret !== "string" ||
@@ -79,6 +101,11 @@ export function assertRequestAccess(
       !timingSafeEqual(actualBytes, expectedBytes)
     )
       denied();
+    if (publicReadOnly) {
+      const role = request.headers.get("x-dtm-access");
+      if (role !== "public" && role !== "admin") denied();
+      return { mode: "hosted", origin: configuredOrigin, role };
+    }
     return { mode: "hosted", origin: configuredOrigin };
   }
 
@@ -97,6 +124,17 @@ export function assertRequestAccess(
   )
     denied();
   return { mode: "local", origin: target.origin };
+}
+
+/** Called after the proxy boundary, before any private read or mutation. */
+export function assertAdminAccess(access: RequestAccessContext): void {
+  if (access.role === "public") denied();
+}
+
+export function assertAdminRequest(request: Request): RequestAccessContext {
+  const access = assertRequestAccess(request);
+  assertAdminAccess(access);
+  return access;
 }
 
 /** Require an exact browser origin for mutations, including HTTPS when hosted. */

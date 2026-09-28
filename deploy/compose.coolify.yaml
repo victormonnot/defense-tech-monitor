@@ -17,6 +17,7 @@ services:
       DTM_DATABASE_PATH: /app/data/monitor.sqlite
       DTM_APP_ORIGIN: https://${APP_HOST}
       DTM_PROXY_SECRET: ${APP_PROXY_SECRET}
+      DTM_PUBLIC_READ_ONLY: "1"
       DTM_COLLECTION_INTERVAL_MINUTES: ${DTM_COLLECTION_INTERVAL_MINUTES:-15}
       X_BEARER_TOKEN: ${X_BEARER_TOKEN}
       DTM_X_MONTHLY_BUDGET_USD: ${DTM_X_MONTHLY_BUDGET_USD:-0}
@@ -51,14 +52,20 @@ configs:
         auto_https off
       }
 
+      (monitor_proxy) {
+        reverse_proxy app:3000 {
+          header_up X-Dtm-Proxy-Secret {$$APP_PROXY_SECRET}
+          header_up X-Dtm-Access {args[0]}
+          header_up -Authorization
+          header_down Cache-Control "private, no-store"
+          header_down X-Frame-Options "DENY"
+        }
+      }
+
       :80 {
         header {
           Cache-Control "private, no-store"
           X-Frame-Options "DENY"
-        }
-
-        basic_auth {
-          {$$APP_LOGIN} {$$APP_PASSWORD_HASH}
         }
 
         encode zstd gzip
@@ -67,11 +74,20 @@ configs:
           max_size 65536
         }
 
-        reverse_proxy app:3000 {
-          header_up X-Dtm-Proxy-Secret {$$APP_PROXY_SECRET}
-          header_up -Authorization
-          header_down Cache-Control "private, no-store"
-          header_down X-Frame-Options "DENY"
+        @management {
+          path /admin /admin/* /api/*
+          not path /api/public-monitor
+        }
+
+        handle @management {
+          basic_auth {
+            {$$APP_LOGIN} {$$APP_PASSWORD_HASH}
+          }
+          import monitor_proxy admin
+        }
+
+        handle {
+          import monitor_proxy public
         }
       }
 

@@ -13,7 +13,7 @@ import { parseFeedInput } from "@/lib/custom-feeds";
 import { processArticleSummary } from "@/lib/summary-service";
 import { parseXAccount } from "@/lib/x-client";
 import {
-  assertRequestAccess,
+  assertAdminRequest,
   assertRequestOrigin,
   RequestAccessError,
 } from "@/lib/request-access";
@@ -31,7 +31,7 @@ function json(body: unknown, status = 200) {
 
 function checkAccess(request: NextRequest, mutation = false) {
   try {
-    const access = assertRequestAccess(request);
+    const access = assertAdminRequest(request);
     assertRequestOrigin(request, access, mutation);
     return null;
   } catch (error) {

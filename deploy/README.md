@@ -1,6 +1,8 @@
-# Private VPS deployment with Coolify
+# Public reading and private administration with Coolify
 
-This setup runs one Next.js server with Node 24 and a persistent SQLite volume. A Caddy gateway authenticates every request with HTTP Basic authentication. Coolify handles the public HTTPS certificate and routes traffic to that gateway. All connected devices use the same personal data; there are no separate user accounts.
+This setup runs one Next.js server with Node 24 and a persistent SQLite volume. Visitors can read the site without signing in. A Caddy gateway protects `/admin` and the management API with HTTP Basic authentication. Coolify handles the public HTTPS certificate and routes traffic to that gateway. The administrator's devices use one shared personal workspace; visitors cannot change it.
+
+The public page and `GET /api/public-monitor` expose only publication metadata, bounded excerpts, original source links, and existing French summaries. Personal profiles, feed briefs, folders, feedback, read/saved states, provider configuration, budgets, and usage are excluded from both HTML and JSON. Public requests never start collection, Jev analysis, X requests, or summary generation. Existing scheduled workers continue according to the administrator's settings.
 
 ## Configure the application
 
@@ -45,7 +47,9 @@ Save the password in your password manager. Save deployment secrets in Coolify, 
 
 X collection requires both `X_BEARER_TOKEN` and a positive `DTM_X_MONTHLY_BUDGET_USD`. With enabled X sources, an existing collection schedule can start paid reads after deployment. Keep the cap at `0` until ready. Create the token and configure a provider spending limit in the [X Developer Console](https://console.x.com/), following the [X setup guide](../README.md#x-accounts-optional). The app's estimate is separate from Jev and summaries, uses UTC calendar months, and covers only this database; X enforces its own spending limit by billing cycle. Check **Sources** for X configuration and usage before the first collection.
 
-The gateway preserves Host and Origin, overwrites `X-Dtm-Proxy-Secret`, and removes Authorization before forwarding to Next.js. Responses use `Cache-Control: private, no-store`; request bodies are limited to 65,536 bytes. Keep the app private on its Docker network and route all browser traffic through the gateway.
+The gateway preserves Host and Origin, overwrites `X-Dtm-Proxy-Secret` and `X-Dtm-Access`, and removes Authorization before forwarding to Next.js. Only requests authenticated on `/admin`, its subpaths, and private API routes receive the `admin` access value; all other requests receive `public`. The only public API exception is the exact `/api/public-monitor` path, which supports reads only. The application independently checks access before reading private data or handling mutations.
+
+Compose sets `DTM_PUBLIC_READ_ONLY=1` in the app. Deploy the matching gateway and app together: removing Basic authentication alone would expose the old personal workspace. Keep the access variables unset for local use, which retains the original dashboard at `/`. Responses use `Cache-Control: private, no-store`; request bodies are limited to 65,536 bytes. Keep the backend private on its Docker network and route all browser traffic through the gateway.
 
 ## Validate and deploy
 
@@ -59,15 +63,19 @@ docker build --pull --target runtime -t defense-tech-monitor:local .
 
 `config --quiet` avoids printing resolved secrets. Do not publish full resolved Compose output. Docker uses standalone Next.js output; normal `npm run build` and `npm start` retain the local loopback workflow.
 
+When upgrading an existing private deployment to public reading, first back up its database, then stop the entire resource and confirm that both the old app and gateway have stopped. Deploy the new revision with the same persistent volume. This brief interruption prevents the new public gateway from forwarding visitors to an old app that still serves private data at `/`.
+
 Deploy the chosen revision in Coolify. Keep a single app instance, without parallel deployments or Swarm. Replacements can briefly interrupt access. Check the app and gateway logs, then verify:
 
 ```sh
 curl --head http://defense.example.com
 curl --head https://defense.example.com
-curl --user your-login --head https://defense.example.com
+curl --head https://defense.example.com/admin
+curl --head https://defense.example.com/api/monitor
+curl --user your-login --head https://defense.example.com/admin
 ```
 
-HTTP should redirect to HTTPS. HTTPS without credentials should return `401`; authenticated access should open the application. The final command prompts for the password. In the browser, verify that existing sources, feeds, saved items, and settings are present. Check **Sources** for the collection schedule and **Profil de veille** for provider configuration before requesting paid work.
+HTTP should redirect to HTTPS. The public HTTPS page and `/api/public-monitor` should return `200` without credentials. `/admin` and `/api/monitor` should return `401` until authenticated. The final command prompts for the password. Public POST requests must not mutate data: the read endpoint rejects POST, and the management endpoint requires authentication and the exact HTTPS Origin. In a signed-out browser, verify the reading page and its assets load without a login prompt. Then open **Administration** and verify that existing sources, feeds, saved items, and settings are present. Check **Sources** for the collection schedule and **Profil de veille** for provider configuration before requesting paid work.
 
 ## Persistent data
 

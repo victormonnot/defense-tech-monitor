@@ -1,9 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
-import { assertRequestAccess, RequestAccessError } from "@/lib/request-access";
+import {
+  assertAdminAccess,
+  assertRequestAccess,
+  RequestAccessError,
+} from "@/lib/request-access";
 
 export function proxy(request: NextRequest) {
   try {
-    assertRequestAccess(request);
+    const access = assertRequestAccess(request);
+    const path = decodeURIComponent(request.nextUrl.pathname);
+    const publicRead =
+      path === "/api/public-monitor" &&
+      (request.method === "GET" || request.method === "HEAD");
+    if (
+      path === "/admin" ||
+      path.startsWith("/admin/") ||
+      ((path === "/api" || path.startsWith("/api/")) && !publicRead)
+    )
+      assertAdminAccess(access);
     return NextResponse.next();
   } catch (error) {
     return NextResponse.json(

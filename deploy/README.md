@@ -1,5 +1,7 @@
 # Public reading and private administration with Coolify
 
+Defense Tech Monitor is still in development before V1. This guide covers the current deployment setup. See the [project overview](../README.md) for its scope, the [usage guide](../docs/usage.md) for the reading and administration workflows, and the [development guide](../docs/development.md) for local setup and optional providers.
+
 This setup runs one Next.js server with Node 24 and a persistent SQLite volume. Visitors can read the site without signing in. A Caddy gateway protects `/admin` and the management API with HTTP Basic authentication. Coolify handles the public HTTPS certificate and routes traffic to that gateway. The administrator's devices use one shared personal workspace; visitors cannot change it.
 
 The public page and `GET /api/public-monitor` expose only publication metadata, bounded excerpts, original source links, and existing French summaries. Personal profiles, feed briefs, folders, feedback, read/saved states, provider configuration, budgets, and usage are excluded from both HTML and JSON. Public requests never start collection, Jev analysis, X requests, or summary generation. Existing scheduled workers continue according to the administrator's settings.
@@ -27,7 +29,7 @@ In **Environment Variables**, set each value as a **Runtime Variable**, with **B
 | `DTM_JEV_MONTHLY_BUDGET_USD`      | Your chosen Jev monthly cap; `0` by default.                                                                                   |
 | `OPENAI_API_KEY`                  | Optional OpenAI key; empty disables generated summaries.                                                                       |
 | `DTM_SUMMARY_MONTHLY_BUDGET_USD`  | Your chosen summary monthly cap; `0` by default.                                                                               |
-| `DTM_SUMMARY_MODEL`               | A supported model from the main README; copy your existing choice when migrating.                                              |
+| `DTM_SUMMARY_MODEL`               | A [supported summary model](../docs/development.md#french-summaries-optional); copy your existing choice when migrating.       |
 
 Keep the four `APP_*` access values configured at runtime. Compose can warn that runtime-only values are absent during a Coolify build; no service starts at that stage. Missing access configuration must be fixed before use. The application fails closed when deployment access settings are incomplete.
 
@@ -45,7 +47,7 @@ openssl rand -hex 32
 
 Save the password in your password manager. Save deployment secrets in Coolify, not Git. `APP_PROXY_SECRET` is supplied to both services; Compose maps it to `DTM_PROXY_SECRET` in the app. `APP_HOST` becomes `DTM_APP_ORIGIN=https://APP_HOST`. Local `.env.local` values are not uploaded automatically: copy only the runtime provider configuration you intend to retain. Keys and caps alone do not enable Jev mode or request a summary. A migrated database can retain an enabled Jev worker, collection schedule, and its spending ledger, so review them before starting it.
 
-X collection requires both `X_BEARER_TOKEN` and a positive `DTM_X_MONTHLY_BUDGET_USD`. With enabled X sources, an existing collection schedule can start paid reads after deployment. Keep the cap at `0` until ready. Create the token and configure a provider spending limit in the [X Developer Console](https://console.x.com/), following the [X setup guide](../README.md#x-accounts-optional). The app's estimate is separate from Jev and summaries, uses UTC calendar months, and covers only this database; X enforces its own spending limit by billing cycle. Check **Sources** for X configuration and usage before the first collection.
+X collection requires both `X_BEARER_TOKEN` and a positive `DTM_X_MONTHLY_BUDGET_USD`. With enabled X sources, an existing collection schedule can start paid reads after deployment. Keep the cap at `0` until ready. Create the token and configure a provider spending limit in the [X Developer Console](https://console.x.com/), following the [X setup guide](../docs/development.md#x-accounts-optional). The app's estimate is separate from Jev and summaries, uses UTC calendar months, and covers only this database; X enforces its own spending limit by billing cycle. Check **Sources** for X configuration and usage before the first collection.
 
 The gateway preserves Host and Origin, overwrites `X-Dtm-Proxy-Secret` and `X-Dtm-Access`, and removes Authorization before forwarding to Next.js. Only requests authenticated on `/admin`, its subpaths, and private API routes receive the `admin` access value; all other requests receive `public`. The only public API exception is the exact `/api/public-monitor` path, which supports reads only. The application independently checks access before reading private data or handling mutations.
 

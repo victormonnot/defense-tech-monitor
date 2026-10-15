@@ -52,13 +52,20 @@ export function plainText(html: string): string {
 
 export function discoverFeed(html: string, siteUrl: string): string | null {
   const $ = load(html);
-  const link = $('link[rel~="alternate"]')
-    .toArray()
-    .find((node) =>
-      /application\/(rss|atom)\+xml/i.test($(node).attr("type") ?? ""),
-    );
-  const href = link && $(link).attr("href");
-  return href ? publicUrl(href, siteUrl) : null;
+  let invalidUrl: unknown;
+  for (const node of $('link[rel~="alternate"]').toArray()) {
+    if (!/application\/(rss|atom)\+xml/i.test($(node).attr("type") ?? ""))
+      continue;
+    const href = $(node).attr("href")?.trim();
+    if (!href) continue;
+    try {
+      return publicUrl(href, siteUrl);
+    } catch (error) {
+      invalidUrl ??= error;
+    }
+  }
+  if (invalidUrl) throw invalidUrl;
+  return null;
 }
 
 export async function parseFeed(

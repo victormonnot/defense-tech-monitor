@@ -173,6 +173,43 @@ test("feed discovery uses explicit RSS or Atom links and rejects unsafe URLs", (
   );
 });
 
+test("feed discovery skips unusable candidates and selects the first valid feed", () => {
+  for (const attributes of [
+    "",
+    'href=""',
+    'href="   "',
+    'href="javascript:alert(1)"',
+    'href="https://user:password@fixture.example.test/feed"',
+    'href="https://[invalid"',
+  ]) {
+    assert.equal(
+      discoverFeed(
+        `<link rel="alternate" type="application/rss+xml" ${attributes}>
+        <link rel="alternate" type="application/atom+xml" href="/first.xml">
+        <link rel="alternate" type="application/rss+xml" href="/second.xml">`,
+        feedUrl,
+      ),
+      "https://fixture.example.test/first.xml",
+      attributes,
+    );
+  }
+});
+
+test("feed discovery distinguishes missing URLs from rejected URLs when no feed is usable", () => {
+  const missingLinks = `<link rel="alternate" type="application/rss+xml">
+    <link rel="alternate" type="application/atom+xml" href="   ">`;
+  assert.equal(discoverFeed(missingLinks, feedUrl), null);
+  assert.throws(
+    () =>
+      discoverFeed(
+        `<link rel="alternate" type="application/rss+xml" href="javascript:alert(1)">
+        ${missingLinks}`,
+        feedUrl,
+      ),
+    /URL HTTP\(S\) sans identifiants requise/,
+  );
+});
+
 test("HTML responses and external XML declarations are rejected", async () => {
   await assert.rejects(
     parseFeed("<html><title>Fixture homepage</title></html>", feedUrl, "en"),

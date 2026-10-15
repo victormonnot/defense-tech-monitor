@@ -85,6 +85,9 @@ Website and feed collection and keyword selection require no provider key. X, Je
 
 For other websites, discovery looks for an RSS/Atom link explicitly advertised by the page. A feed URL can also be supplied directly. Failure to discover a feed does not mean a website has stopped publishing. There is no general website scraper.
 
+When a page advertises several RSS/Atom links, discovery uses the first usable
+HTTP(S) URL without credentials, skipping missing, blank, or invalid links.
+
 Each dedicated connector reads one listing page per collection, without pagination or a full archive import. RSS/Atom parsing considers up to 200 items from a response. Collection preserves previously imported publications when a source fails and continues with other sources. Conditional requests using `ETag` and `Last-Modified`, plus content hashes, reduce repeated work.
 
 Sources checked within `DTM_COLLECTION_INTERVAL_MINUTES` are normally skipped. Disabled and unsupported sources are skipped too. Disabling a source prevents pending requests from starting; responses become stale if activation, feed URL or language changes while a request runs. Renaming preserves collected data and caches.

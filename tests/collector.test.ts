@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test, { type TestContext } from "node:test";
-import { collectSources, type FetchResource } from "../src/lib/collector";
+import {
+  collectSources,
+  discoverSource,
+  type FetchResource,
+} from "../src/lib/collector";
 import type { HttpResult } from "../src/lib/network";
 import { MonitorStore } from "../src/lib/store";
 
@@ -49,6 +53,24 @@ function expireCheck(store: MonitorStore, id: string) {
     .prepare("UPDATE sources SET last_checked_at=? WHERE id=?")
     .run(new Date(Date.now() - 3600000).toISOString(), id);
 }
+
+test("source discovery resolves a later usable feed against the final page URL", async () => {
+  const siteUrl = "https://example.com/";
+  const result = await discoverSource(siteUrl, async (url) => {
+    assert.equal(url, siteUrl);
+    return {
+      url: "https://example.com/news/",
+      status: 200,
+      headers: {},
+      body: `<html><head>
+        <link rel="alternate" type="application/rss+xml" href="   ">
+        <link rel="alternate" type="application/rss+xml" href="javascript:alert(1)">
+        <link rel="alternate" type="application/atom+xml" href="feeds/atom.xml">
+        </head></html>`,
+    };
+  });
+  assert.equal(result, "https://example.com/news/feeds/atom.xml");
+});
 
 test("collection ingests real feed structure once and observes the minimum interval", async (t) => {
   const store = createStore(t);

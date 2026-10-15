@@ -13,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 import type { PublicArticle, PublicSnapshot } from "@/lib/public-monitor";
+import { createSearchMatcher } from "@/lib/search";
 import styles from "./public-monitor.module.css";
 
 const PAGE_SIZE = 30;
@@ -38,13 +39,6 @@ function languageLabel(value: string) {
     und: "Langue non précisée",
   };
   return known[value] ?? value;
-}
-
-function normalize(value: string) {
-  return value
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "")
-    .toLocaleLowerCase("fr-FR");
 }
 
 function textPreview(text: string) {
@@ -187,15 +181,16 @@ export function PublicMonitor({
   const searchId = useId();
   const sourceSelectId = useId();
   const articles = useMemo(() => {
-    const words = normalize(query).trim().split(/\s+/u).filter(Boolean);
+    const matchesSearch = createSearchMatcher(query);
     return snapshot.articles
       .filter((article) => {
         if (sourceId && article.sourceId !== sourceId) return false;
-        if (!words.length) return true;
-        const searchable = normalize(
-          `${article.title} ${article.sourceName} ${article.excerpt ?? ""} ${article.summary?.text ?? ""}`,
-        );
-        return words.every((word) => searchable.includes(word));
+        return matchesSearch([
+          article.title,
+          article.sourceName,
+          article.excerpt,
+          article.summary?.text,
+        ]);
       })
       .sort((a, b) => {
         const first = Date.parse(a.publishedAt ?? a.collectedAt) || 0;

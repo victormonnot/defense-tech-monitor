@@ -29,6 +29,11 @@ The **…** menu reveals folders, feedback, content provenance, scores, and rela
 publications. Opening these controls does not mark an article as read or request
 a summary.
 
+Search ignores case, Latin accents, and extra spaces. Every search term must
+appear, in any order: `defense drone` also finds `Drone de défense`. Personal
+views search titles, excerpts, sources, and topics; public search also includes
+available French summaries instead of personal topic tags.
+
 In a hosted installation, the public page offers collected publications, source
 filtering, search, and existing French summaries. It contains all collected
 publications, independently of the personal selection. Personal settings,

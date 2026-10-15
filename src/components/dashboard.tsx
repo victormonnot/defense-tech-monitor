@@ -45,6 +45,7 @@ import type {
 } from "@/lib/types";
 import type { StoryGroup } from "@/lib/stories";
 import { buildFeedItems } from "@/lib/story-feed";
+import { createSearchMatcher } from "@/lib/search";
 import {
   activityOrder,
   matchesActivity,
@@ -336,7 +337,7 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
   ].sort((a, b) => a.localeCompare(b, "fr"));
 
   const filteredArticles = useMemo(() => {
-    const query = search.trim().toLocaleLowerCase("fr");
+    const matchesSearch = createSearchMatcher(search);
     return contextArticles.filter((article) => {
       if (view === "personal" && !matchesProfile(article, data.profile))
         return false;
@@ -361,16 +362,12 @@ export function Dashboard({ initialData }: { initialData: Snapshot }) {
       if (languageFilter && article.language !== languageFilter) return false;
       if (themeFilter && !article.themes.includes(themeFilter)) return false;
       if (formatFilter && article.format !== formatFilter) return false;
-      if (
-        query &&
-        ![article.title, article.excerpt, article.sourceName, ...article.themes]
-          .filter(Boolean)
-          .join(" ")
-          .toLocaleLowerCase("fr")
-          .includes(query)
-      )
-        return false;
-      return true;
+      return matchesSearch([
+        article.title,
+        article.excerpt,
+        article.sourceName,
+        ...article.themes,
+      ]);
     });
   }, [
     data,
